@@ -26,10 +26,3 @@ spec:
                 secretKeyRef:
                   name: bunker-bot-secrets
                   key: TG_API_TOKEN
-          resources:
-            limits:
-              memory: 128Mi
-              cpu: "500m"
-            requests:
-              memory: 50Mi
-              cpu: "200m"
