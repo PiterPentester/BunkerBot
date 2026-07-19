@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: ghcr.io/piterpentester/bunker-bot:latest
+          image: ghcr.io/piterpentester/bunker-bot:7cda315d
           imagePullPolicy: IfNotPresent
           env:
             - name: TELEGRAM_TOKEN
