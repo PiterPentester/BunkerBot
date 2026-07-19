@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bunker-bot
+  namespace: default
+  labels:
+    app: bunker-bot
+status: {}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bunker-bot
+  template:
+    metadata:
+      labels:
+        app: bunker-bot
+    spec:
+      containers:
+        - name: agent
+          image: ghcr.io/piterpentester/bunker-bot:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TELEGRAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: bunker-bot-secrets
+                  key: TELEGRAM_TOKEN
+          resources:
+            limits:
+              memory: 128Mi
+              cpu: "500m"
+            requests:
+              memory: 50Mi
+              cpu: "200m"
