@@ -21,11 +21,11 @@ spec:
           image: ghcr.io/piterpentester/bunker-bot:7cda315d
           imagePullPolicy: IfNotPresent
           env:
-            - name: TELEGRAM_TOKEN
+            - name: TG_API_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: bunker-bot-secrets
-                  key: TELEGRAM_TOKEN
+                  key: TG_API_TOKEN
           resources:
             limits:
               memory: 128Mi
