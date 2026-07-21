@@ -1,4 +1,3 @@
-# bot.py
 import os
 import asyncio
 import logging
@@ -42,19 +41,16 @@ def get_start_keyboard():
     return builder.as_markup()
 
 def get_reveal_keyboard(room_id: str, character: dict, is_alive: bool = True):
-    """Генерує кнопки відкриття характеристик для особистої картки"""
     builder = InlineKeyboardBuilder()
     if is_alive:
         for key, label in LABELS.items():
             if key not in character["opened"]:
                 builder.button(text=f"Відкрити {label}", callback_data=f"rev:{room_id}:{key}")
         builder.adjust(2)
-        # Кнопка голосування тепер знаходиться тут — під особистою карткою кожного живого гравця
         builder.row(types.InlineKeyboardButton(text="🗳️ Почати голосування раунду", callback_data=f"init_vote:{room_id}"))
     return builder.as_markup()
 
 def format_personal_card(character: dict):
-    """Формує текст для особистої картки гравця"""
     return (
         f"📌 **ТВОЯ ЗАКРІПЛЕНА КАРТКА ПЕРСОНАЖА**\n"
         f"_(Ніхто інший не бачить цей текст, поки ти не відкриєш характеристики)_\n\n"
@@ -68,7 +64,6 @@ def format_personal_card(character: dict):
     )
 
 async def update_live_dashboards(room_id: str):
-    """Оновлює чисте Загальне табло без кнопок дій у всіх учасників"""
     room = ROOMS.get(room_id)
     if not room:
         return
@@ -104,7 +99,7 @@ async def update_live_dashboards(room_id: str):
                     chat_id=p_id,
                     message_id=msg_id,
                     text=text_to_send,
-                    reply_markup=None, # Жодних кнопок під табло
+                    reply_markup=None,
                     parse_mode="Markdown"
                 )
             except Exception:
@@ -236,7 +231,6 @@ async def start_game(callback: types.CallbackQuery):
     room["status"] = "playing"
     await callback.message.edit_text("🎮 Гра розпочалася! Картки дій закріплено у ваших чатах.")
 
-    # Надсилаємо та закріплюємо картки з кнопками під ними
     for player_id, p_data in room["players"].items():
         char = p_data["character"]
         personal_card_text = format_personal_card(char)
@@ -274,11 +268,8 @@ async def process_reveal(callback: types.CallbackQuery):
     char["opened"].append(trait_key)
     await callback.answer("Характеристику розкрито!")
 
-    # Оновлюємо кнопки під особистою карткою (прибираємо ту, яку вже натиснули)
     new_reveal_kb = get_reveal_keyboard(room_id, char)
     await callback.message.edit_reply_markup(reply_markup=new_reveal_kb)
-
-    # Тихо оновлюємо глобальне табло для всіх учасників
     await update_live_dashboards(room_id)
 
 @dp.callback_query(F.data.startswith("init_vote:"))
@@ -356,18 +347,17 @@ async def process_vote(callback: types.CallbackQuery):
 
         try:
             await bot.unpin_chat_message(chat_id=kicked_id)
-            # Прибираємо інтерфейс кнопок під особистою карткою у того, хто вибув
             await bot.edit_message_reply_markup(chat_id=kicked_id, message_id=room["players"][kicked_id]["card_message_id"], reply_markup=None)
         except Exception:
             pass
 
         await update_live_dashboards(room_id)
 
-        current_alive = [v for v in room["players"].values() if not v.get("is_spectator", False)]
+        current_alive_list = [v for v in room["players"].values() if not v.get("is_spectator", False)]
 
-        if len(current_alive) <= room["bunker_seats"]:
-            success, final_msg = evaluate_survival(room["apocalypse"], current_alive)
-            survivor_names = ", ".join([p["name"] for p in current_alive])
+        if len(current_alive_list) <= room["bunker_seats"]:
+            success, final_msg = evaluate_survival(room["apocalypse"], current_alive_list)
+            survivor_names = ", ".join([p["name"] for p in current_alive_list])
 
             for p_id in room["players"].keys():
                 try:
@@ -381,7 +371,6 @@ async def process_vote(callback: types.CallbackQuery):
             room["round"] += 1
             room["status"] = "playing"
 
-            # Після зміни раунду оновлюємо інтерфейс кнопок під картками УСІХ живих гравців (щоб з'явилася кнопка голосування на новий раунд)
             for p_id, p_data in room["players"].items():
                 if not p_data.get("is_spectator", False):
                     try:

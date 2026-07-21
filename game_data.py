@@ -363,51 +363,61 @@ def generate_character():
 
 def evaluate_survival(apocalypse_name, survivors):
     apoc = APOCALYPSES[apocalypse_name]
-    useful_people = 0
+    key_players = [] # Список ключових гравців та їх внесок
     deadly_sick_count = 0
     survivors_list = list(survivors)
     total_survivors = len(survivors_list)
 
-    # Захист від порожньої кімнати
     if total_survivors == 0:
-        return False, "💀 **Бункер порожній.** Усі гравці вибули або ніхто не потрапив усередину."
+        return False, "💀 **Бункер порожній.** Усі гравці вибули."
 
     for p in survivors_list:
         char = p["character"]
+        player_name = p["name"]
+        player_prof = char["profession"]
+        player_hobby = char["hobby"]
 
-        # Приводимо до нижнього регістру професію та хобі гравця для надійного пошуку
-        player_profession = char["profession"].lower()
-        player_hobby = char["hobby"].lower()
+        prof_lower = player_prof.lower()
+        hobby_lower = player_hobby.lower()
 
-        # Перевіряємо, чи хоч одна з необхідних навичок міститься в картці гравця
-        is_useful = False
-        for req_trait in apoc["required"]:
-            req_trait_lower = req_trait.lower()
-            if req_trait_lower in player_profession or req_trait_lower in player_hobby:
-                is_useful = True
-                break
+        reasons = []
+        for req in apoc["required"]:
+            req_lower = req.lower()
+            if req_lower in prof_lower:
+                reasons.append(f"Професія: `{player_prof}`")
+            if req_lower in hobby_lower:
+                reasons.append(f"Хобі: `{player_hobby}`")
 
-        if is_useful:
-            useful_people += 1
+        if reasons:
+            unique_reasons = list(set(reasons))
+            key_players.append(f"⭐ **{player_name}** — {', '.join(unique_reasons)}")
 
-        # Шукаємо корінь слова "смертельн"
         if "смертельн" in char["health"].lower():
             deadly_sick_count += 1
 
-    # Розрахунок коефіцієнта здоров'я
     healthy_ratio = (total_survivors - deadly_sick_count) / total_survivors
 
-    # Перевірка умов виживання
-    if useful_people >= 1 and healthy_ratio >= apoc["min_healthy"]:
-        return True, (f"🎉 **ВИ ВИЖИЛИ!**\n\nУ вашому бункері опинилося {useful_people} фахівців, "
-                      f"необхідних для умов '{apocalypse_name}'. Рівень здоров'я команди дозволив "
-                      f"почати відбудову цивілізації. Бункер процвітає!")
+    if len(key_players) >= 1 and healthy_ratio >= apoc["min_healthy"]:
+        key_section = "\n".join(key_players)
+        return True, (
+            f"🎉 **ВИ ВИЖИЛИ!**\n\n"
+            f"🌟 **Ключові гравці, які врятували бункер:**\n{key_section}\n\n"
+            f"Завдяки їхнім критично важливим навичкам та достатньому рівню здоров'я команди "
+            f"бункер змог успішно подолати катастрофу '{apocalypse_name}'!"
+        )
     else:
         reason = ""
-        if useful_people == 0:
-            reason += f"• У бункері не залишилося жодного спеціаліста з навичками: {', '.join(apoc['required'])}.\n"
-        if healthy_ratio < apoc["min_healthy"]:
-            reason += f"• Відсоток смертельно хворих занадто високий ({deadly_sick_count} з {total_survivors}). Інфекція або нестача догляду знищила колонію.\n"
+        if len(key_players) == 0:
+            reason += f"• У бункері не опинилося жодного спеціаліста з необхідними для цього сценарію навичками ({', '.join(apoc['required'])}).\n"
+        else:
+            key_section = "\n".join(key_players)
+            reason += f"• Попри наявність важливих фахівців:\n{key_section}\n"
 
-        return False, (f"💀 **БУНКЕР ЗАГИНУВ...**\n\nПричина невдачі:\n{reason}\n"
-                      f"Спільнота не змогла протистояти загрозі '{apocalypse_name}'.")
+        if healthy_ratio < apoc["min_healthy"]:
+            reason += f"• Відсоток смертельно хворих виявився критичним ({deadly_sick_count} з {total_survivors}), що призвело до вимирання колонії.\n"
+
+        return False, (
+            f"💀 **БУНКЕР ЗАГИНУВ...**\n\n"
+            f"Причина невдачі:\n{reason}\n"
+            f"Спільнота не змогла вижити в умовах катастрофи '{apocalypse_name}'."
+        )
