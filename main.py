@@ -119,7 +119,7 @@ async def update_live_dashboards(room_id: str):
                 dash_text += f" ├ {label}: <i>[Приховано]</i>\n"
         dash_text += "\n"
 
-    for p_id, p_data in room["players"].items():
+    async def _update_single_player(p_id: int, p_data: dict):
         text_to_send = dash_text if not p_data.get("is_spectator", False) else "👁️ <b>Режим спостерігача</b>\n\n" + dash_text
         msg_id = p_data.get("dash_message_id")
 
@@ -143,6 +143,10 @@ async def update_live_dashboards(room_id: str):
                 p_data["dash_message_id"] = sent_msg.message_id
             except Exception:
                 pass
+
+    # Execute all Telegram API calls concurrently in parallel for instant user UI updates
+    tasks = [_update_single_player(p_id, p_data) for p_id, p_data in room["players"].items()]
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message, command: CommandObject, state: FSMContext):
@@ -539,11 +543,11 @@ async def process_action_target(callback: types.CallbackQuery):
     actor_char["action_used"] = True
     await callback.message.edit_text(f"✅ Дія виконана: {msg}", parse_mode="HTML")
 
-    for p_id in room["players"].keys():
-        try:
-            await bot.send_message(p_id, f"⚡ <b>ПОДІЯ:</b> {msg}", parse_mode="HTML")
-        except Exception:
-            pass
+    broadcast_tasks = [
+        bot.send_message(p_id, f"⚡ <b>ПОДІЯ:</b> {msg}", parse_mode="HTML")
+        for p_id in room["players"].keys()
+    ]
+    await asyncio.gather(*broadcast_tasks, return_exceptions=True)
 
     await update_live_dashboards(room_id)
 
@@ -644,8 +648,12 @@ async def process_vote(callback: types.CallbackQuery):
                 room["bunker_seats"] = max(1, room["bunker_seats"] - 1)
                 cond_msg += "\n🚪 <i>Кількість місць у бункері зменшено на 1!</i>"
 
-            for p_id in room["players"].keys():
-                await bot.send_message(p_id, cond_msg, parse_mode="HTML")
+            # Parallelize condition message broadcasts
+            broadcast_tasks = [
+                bot.send_message(p_id, cond_msg, parse_mode="HTML")
+                for p_id in room["players"].keys()
+            ]
+            await asyncio.gather(*broadcast_tasks, return_exceptions=True)
 
         for pdata in alive_players.values():
             pdata["character"]["is_protected"] = False
@@ -657,13 +665,17 @@ async def process_vote(callback: types.CallbackQuery):
         current_alive = [v for v in room["players"].values() if not v.get("is_spectator", False)]
         if len(current_alive) <= room["bunker_seats"]:
             success, final_msg = evaluate_survival(room["apocalypse"], current_alive)
-            for p_id in room["players"].keys():
-                await bot.send_message(
+
+            final_tasks = [
+                bot.send_message(
                     p_id,
                     f"🏁 <b>ФІНАЛ ГРИ!</b>\n\n{final_msg}",
                     reply_markup=get_new_game_keyboard(),
                     parse_mode="HTML"
                 )
+                for p_id in room["players"].keys()
+            ]
+            await asyncio.gather(*final_tasks, return_exceptions=True)
             del ROOMS[room_id]
         else:
             room["round"] += 1
