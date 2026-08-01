@@ -5,10 +5,12 @@ on:
     branches: ["master", "main"]
     paths-ignore:
       - "website/**"
+      - ".github/workflows/webpage.yaml"
   pull_request:
     branches: ["master", "main"]
     paths-ignore:
       - "website/**"
+      - ".github/workflows/webpage.yaml"
   workflow_dispatch:
     inputs:
       push_image:

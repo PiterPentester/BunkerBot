@@ -1,0 +1,6 @@
+{
+  "name": "BunkerBot",
+  "description": "A landing page for BunkerBot, a Telegram implementation of the psychological party game Bunker.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
