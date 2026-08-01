@@ -1,6 +1,6 @@
 # game_data.py
 import random
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 import html
 
 APOCALYPSES: Dict[str, Dict[str, Any]] = {
@@ -344,6 +344,33 @@ LABELS = {
     "fact": "📜 Факт з життя"
 }
 
+BUNKER_CONDITIONS = [
+    "Ідеальний стан (нова система вентиляції та зміцнені стіни)",
+    "Задовільний стан (потрібен періодичний ремонт генератора)",
+    "Аварійний стан (часті протікання води та пошкоджені фільтри)",
+    "Занедбаний (підвищена вологість, слабкий захист гермодверей)"
+]
+
+BUNKER_RESOURCES = [
+    "Багаті запаси (їжі та води вистачить із надлишком, є медичний блок)",
+    "Нормальний рівень (вистачає на базові потреби без розкошів)",
+    "Обмежені ресурси (суворий нормований раціон, дефіцит медикаментів)",
+    "Критичний мінімум (значна нестача води, їжа зіпсована на 30%)"
+]
+
+def generate_bunker_info() -> dict:
+    """Генерує випадкові параметри середовища бункера."""
+    years = random.randint(1, 40)
+    durability = random.randint(30, 100)
+    condition = random.choice(BUNKER_CONDITIONS)
+    resources = random.choice(BUNKER_RESOURCES)
+    return {
+        "years": years,
+        "durability": durability,
+        "condition": condition,
+        "resources": resources
+    }
+
 def generate_character() -> dict:
     """Генерує випадкові характеристики персонажа."""
     return {
@@ -364,107 +391,100 @@ def generate_character() -> dict:
         "opened": []
     }
 
-def evaluate_survival(apocalypse_name: str, survivors: list[dict]) -> tuple[bool, str]:
-    """Аналізує склад групи тих, хто вижив, і визначає результат гри."""
-    apoc = APOCALYPSES.get(apocalypse_name, list(APOCALYPSES.values())[0])
-    key_players = []
-    deadly_sick_count = 0
-    total_survivors = len(survivors)
+def evaluate_survival(apocalypse_name: str, alive_players: List[dict], bunker_info: dict) -> Tuple[bool, str]:
+    apoc = APOCALYPSES.get(apocalypse_name, {})
+    key_profs = apoc.get("key_professions", [])
+    years = bunker_info.get("years", 5)
+    durability = bunker_info.get("durability", 50)
+    min_dur = apoc.get("min_bunker_durability", 50)
 
-    if total_survivors == 0:
-        return False, "💀 <b>Бункер порожній.</b> Усі гравці вибули."
+    score = 0
+    details = []
 
-    fertile_men = []
-    fertile_women = []
+    # 1. Перевірка стану та міцності бункера
+    if durability >= min_dur:
+        score += 25
+        details.append(f"✅ Бункер (міцність {durability}%) витримав основні руйнівні чинники апокаліпсису ({apocalypse_name}).")
+    else:
+        score -= 20
+        details.append(f"⚠️ Бункер виявився занадто слабким (міцність {durability}% при необхідних {min_dur}%). Його частково зруйновано.")
 
-    for p in survivors:
+    # 2. Розрахунок віку після перебування в бункері та репродуктивного потенціалу
+    adult_males = []
+    adult_females = []
+    sick_players = []
+
+    for p in alive_players:
+        name = html.escape(p.get("name", "Невідомий"))
         char = p["character"]
-        player_name = html.escape(p["name"])
-        player_prof = char["profession"]
-        player_hobby = char["hobby"]
+        age_at_exit = char["age"] + years
         gender = char["gender"]
-        age = char["age"]
-        health_lower = char["health"].lower()
+        health = str(char["health"]).lower()
+        fact = str(char["fact"]).lower()
 
-        is_deadly = "смертельн" in health_lower or "чума" in health_lower
-        if is_deadly:
-            deadly_sick_count += 1
+        is_fertile = "безплід" not in health and "безплід" not in fact
 
-        # Перевірка фертильності (репродуктивного віку та стану здоров'я)
-        if not is_deadly:
-            if gender == "Чоловік" and 18 <= age <= 60:
-                fertile_men.append(f"{player_name} ({age} р.)")
-            elif gender == "Жінка" and 18 <= age <= 45:
-                fertile_women.append(f"{player_name} ({age} р.)")
+        if age_at_exit >= 16 and is_fertile:
+            if gender == "Чоловік":
+                adult_males.append(f"{name} (досяг {age_at_exit} р.)")
+            elif gender == "Жінка":
+                adult_females.append(f"{name} (досягла {age_at_exit} р.)")
 
-        prof_lower = player_prof.lower()
-        hobby_lower = player_hobby.lower()
+        if any(h in health for h in ["хвороба", "чума", "діабет", "астма"]):
+            sick_players.append(name)
 
-        reasons = []
-        # Fast zip evaluation using pre-compiled lowercased skill keywords
-        for req, req_lower in zip(apoc["required"], apoc.get("required_lower", [])):
-            if req_lower in prof_lower:
-                reasons.append(f"Професія: <code>{html.escape(player_prof)}</code>")
-            if req_lower in hobby_lower:
-                reasons.append(f"Хобі: <code>{html.escape(player_hobby)}</code>")
-
-        if reasons:
-            unique_reasons = list(set(reasons))
-            key_players.append(f"⭐ <b>{player_name}</b> — {', '.join(unique_reasons)}")
-
-    healthy_ratio = (total_survivors - deadly_sick_count) / total_survivors
-    needs_repopulation = apoc.get("repopulation_needed", False)
-
-    repopulation_possible = True
-    repopulation_reasons = []
-
-    if needs_repopulation:
-        if len(fertile_men) == 0:
-            repopulation_possible = False
-            repopulation_reasons.append("• Відсутні чоловіки фертильного віку (18-60 років) без смертельних хвороб.")
-        if len(fertile_women) == 0:
-            repopulation_possible = False
-            repopulation_reasons.append("• Відсутні жінки фертильного віку (18-45 років) без смертельних хвороб.")
-
-    has_enough_skills = len(key_players) >= 1
-    has_enough_health = healthy_ratio >= apoc["min_healthy"]
-
-    if has_enough_skills and has_enough_health and repopulation_possible:
-        key_section = "\n".join(key_players)
-        repo_msg = ""
-        if needs_repopulation:
-            repo_msg = (
-                f"\n\n🧬 <b>Демографічний потенціал:</b>\n"
-                f"• Здорові чоловіки репродуктивного віку: {len(fertile_men)} ({', '.join(fertile_men)})\n"
-                f"• Здорові жінки репродуктивного віку: {len(fertile_women)} ({', '.join(fertile_women)})\n"
-                f"<i>Людський рід буде успішно відновлено!</i>"
-            )
-
-        return True, (
-            f"🎉 <b>ВИ ВИЖИЛИ!</b>\n\n"
-            f"🌟 <b>Ключові гравці, які врятували бункер:</b>\n{key_section}"
-            f"{repo_msg}\n\n"
-            f"Завдяки їхнім критично важливим навичкам, здоров'ю та демографічному складу "
-            f"бункер успішно подолав катастрофу '<b>{html.escape(apocalypse_name)}</b>'!"
+    # Аналіз популяції з нікнеймами
+    if adult_males and adult_females:
+        score += 35
+        males_str = ", ".join(adult_males)
+        females_str = ", ".join(adult_females)
+        details.append(
+            f"👶 <b>Відновлення популяції можливе!</b> За {years} років ізоляції необхідного віку (16+) "
+            f"та статевої зрілості досягли:\n"
+            f"  • Чоловіки: <b>{males_str}</b>\n"
+            f"  • Жінки: <b>{females_str}</b>"
         )
     else:
-        reason = ""
-        if not has_enough_skills:
-            reqs = ", ".join(apoc['required'])
-            reason += f"• У бункері не опинилося фахівців із потрібними навичками ({html.escape(reqs)}).\n"
-        else:
-            key_section = "\n".join(key_players)
-            reason += f"• Попри наявність фахівців:\n{key_section}\n"
-
-        if not has_enough_health:
-            reason += f"• Відсоток смертельно хворих виявився критичним ({deadly_sick_count} з {total_survivors}).\n"
-
-        if needs_repopulation and not repopulation_possible:
-            reason += "• <b>Криза репопуляції:</b> Поза бункером немає виживших, а всередині неможливо відновити людський рід:\n"
-            reason += "\n".join(repopulation_reasons) + "\n"
-
-        return False, (
-            f"💀 <b>БУНКЕР ЗАГИНУВ...</b>\n\n"
-            f"<b>Причина невдачі:</b>\n{reason}\n"
-            f"Спільнота не змогла вижити або забезпечити майбутнє людства в умовах '<b>{html.escape(apocalypse_name)}</b>'."
+        score -= 25
+        details.append(
+            f"❌ <b>Популяція приречена на вимирання:</b> За {years} років у бункері "
+            f"не сформувалося зрілої репродуктивної пари (Чоловіків 16+: {len(adult_males)}, Жінок 16+: {len(adult_females)})."
         )
+
+    # 3. Наявність критично важливих професій з нікнеймами
+    key_specialists = []
+    for p in alive_players:
+        name = html.escape(p.get("name", "Невідомий"))
+        prof = p["character"]["profession"]
+        if prof in key_profs:
+            key_specialists.append(f"<b>{name}</b> ({prof})")
+
+    if key_specialists:
+        score += 25
+        specs_str = ", ".join(key_specialists)
+        details.append(f"👨‍🔬 <b>Ключовий персонал для виживання:</b> {specs_str}.")
+    else:
+        score -= 15
+        details.append(f"⚠️ Відсутні критично важливі професії ({', '.join(key_profs)}) для подолання катастрофи.")
+
+    # 4. Стан здоров'я
+    if not sick_players:
+        score += 15
+        details.append("💊 Усі вижилі абсолютно здорові.")
+    else:
+        score -= 10
+        sick_str = ", ".join(sick_players)
+        details.append(f"☣️ Проблеми зі здоров'ям мають: <b>{sick_str}</b>, що ускладнює виживання.")
+
+    is_success = score >= 50
+    status_str = "УСПІШНЕ ВИЖИВАННЯ! 🎉" if is_success else "ЗАГИБЕЛЬ БУНКЕРА! ☠️"
+
+    report = (
+        f"🏆 <b>ПІДСУМОК ВИЖИВАННЯ: {status_str}</b>\n\n"
+        f"⏳ Час ізоляції: <b>{years} років</b>\n"
+        f"🏚️ Стан бункера: <b>{bunker_info['condition']}</b> (Міцність: {durability}%)\n"
+        f"📦 Ресурси: <b>{bunker_info['resources']}</b>\n\n"
+        f"<b>Детальний аналіз експертів:</b>\n\n" + "\n\n".join(details)
+    )
+
+    return is_success, report
