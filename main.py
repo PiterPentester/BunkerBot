@@ -315,6 +315,12 @@ async def process_reveal(callback: types.CallbackQuery):
                 raise
         await update_live_dashboards(room_id)
 
+# Перелік дій, які вимагають вибору цілі (іншого гравця)
+TARGETED_ACTIONS = {
+    "SWAP_BAG", "SWAP_HEALTH", "SWAP_PROF", "SWAP_HOBBY",
+    "INFECT", "STEAL_BAG", "CHECK", "SILENCE"
+}
+
 @dp.callback_query(F.data.startswith("use_act:"))
 async def use_action(callback: types.CallbackQuery):
     room_id = callback.data.split(":")[1]
@@ -337,44 +343,31 @@ async def use_action(callback: types.CallbackQuery):
     act = char["action"]
     act_type = act["type"]
 
+    # --- МИТТЄВІ ДІЇ БЕЗ ЦІЛІ ---
     if act_type == "SABOTAGE":
         room["bunker_seats"] = max(1, room["bunker_seats"] - 1)
         char["action_used"] = True
         await callback.message.answer("💥 <b>Ви вчинили саботаж!</b> Кількість місць у бункері зменшено на 1.", parse_mode="HTML")
-        await callback.message.edit_reply_markup(reply_markup=get_reveal_keyboard(room_id, char))
-        await update_live_dashboards(room_id)
-        return
 
     elif act_type == "ADD_SEAT":
         room["bunker_seats"] += 1
         char["action_used"] = True
         await callback.message.answer("🛠️ <b>Ви відремонтували бункер!</b> Додано +1 місце.", parse_mode="HTML")
-        await callback.message.edit_reply_markup(reply_markup=get_reveal_keyboard(room_id, char))
-        await update_live_dashboards(room_id)
-        return
 
     elif act_type == "HEAL":
         char["health"] = "Повністю здоровий(а)"
         char["action_used"] = True
         await callback.message.answer("💉 <b>Ви використали ліки!</b> Тепер ви повністю здорові.", parse_mode="HTML")
-        await callback.message.edit_reply_markup(reply_markup=get_reveal_keyboard(room_id, char))
-        await update_live_dashboards(room_id)
-        return
 
     elif act_type == "PROTECT":
         char["is_protected"] = True
         char["action_used"] = True
         await callback.message.answer("🛡️ <b>Штурмовий щит активовано!</b> Ви захищені від вигнання у цьому раунді.", parse_mode="HTML")
-        await callback.message.edit_reply_markup(reply_markup=get_reveal_keyboard(room_id, char))
-        await update_live_dashboards(room_id)
-        return
 
     elif act_type == "DOUBLE_VOTE":
         char["double_vote"] = True
         char["action_used"] = True
         await callback.message.answer("🗳️ <b>Ваш голос у цьому раунді буде вираховуватися за два!</b>", parse_mode="HTML")
-        await callback.message.edit_reply_markup(reply_markup=get_reveal_keyboard(room_id, char))
-        return
 
     elif act_type == "REVEAL_ALL":
         char["action_used"] = True
@@ -384,51 +377,55 @@ async def use_action(callback: types.CallbackQuery):
                 if unopened:
                     p_data["character"]["opened"].append(random.choice(unopened))
         await callback.message.answer("📢 <b>Викривач!</b> Відкрито по 1 прихованій характеристиці кожного гравця.", parse_mode="HTML")
-        await callback.message.edit_reply_markup(reply_markup=get_reveal_keyboard(room_id, char))
-        await update_live_dashboards(room_id)
-        return
 
     elif act_type == "REROLL_SELF":
         char["profession"] = random.choice(PROFESSIONS)
         char["hobby"] = random.choice(HOBBIES)
         char["action_used"] = True
         await callback.message.answer(f"🎭 <b>Особистість змінено!</b> Нова професія: {char['profession']}, Хобі: {char['hobby']}", parse_mode="HTML")
-        await callback.message.edit_reply_markup(reply_markup=get_reveal_keyboard(room_id, char))
-        await update_live_dashboards(room_id)
-        return
 
     elif act_type == "REFLECT_VOTE":
         char["reflect_vote"] = True
         char["action_used"] = True
         await callback.message.answer("🃏 <b>Дзеркальний щит активовано!</b> Голоси проти вас повернуться тим, хто проголосував.", parse_mode="HTML")
-        await callback.message.edit_reply_markup(reply_markup=get_reveal_keyboard(room_id, char))
-        return
 
     elif act_type == "CANCEL_VOTES":
         char["cancel_votes"] = True
         char["action_used"] = True
         await callback.message.answer("🕊️ <b>Амністія!</b> Усі голоси проти вас у цьому раунді будуть анульовані.", parse_mode="HTML")
-        await callback.message.edit_reply_markup(reply_markup=get_reveal_keyboard(room_id, char))
-        return
 
-    alive_players = {k: v for k, v in room["players"].items() if not v.get("is_spectator", False) and k != user_id}
+    # --- ЦІЛЬОВІ ДІЇ ---
+    elif act_type in TARGETED_ACTIONS:
+        alive_players = {k: v for k, v in room["players"].items() if not v.get("is_spectator", False) and k != user_id}
 
-    if not alive_players:
-        await callback.answer("Немає доступних цілей для цієї дії!", show_alert=True)
-        return
+        if not alive_players:
+            await callback.answer("Немає доступних цілей для цієї дії!", show_alert=True)
+            return
 
-    builder = InlineKeyboardBuilder()
-    for target_id, target_data in alive_players.items():
-        builder.button(
-            text=target_data["name"],
-            callback_data=f"act_target:{room_id}:{act_type}:{target_id}"
+        builder = InlineKeyboardBuilder()
+        for target_id, target_data in alive_players.items():
+            builder.button(
+                text=target_data["name"],
+                callback_data=f"act_target:{room_id}:{act_type}:{target_id}"
+            )
+        builder.adjust(1)
+
+        await callback.message.answer(
+            f"🎯 <b>Обери ціль для дії '{html.escape(act['name'])}':</b>",
+            reply_markup=builder.as_markup(), parse_mode="HTML"
         )
-    builder.adjust(1)
+        return
+    else:
+        await callback.answer(f"❌ Невідомий тип дії: {act_type}", show_alert=True)
+        return
 
-    await callback.message.answer(
-        f"🎯 <b>Обери ціль для дії '{html.escape(act['name'])}':</b>",
-        reply_markup=builder.as_markup(), parse_mode="HTML"
-    )
+    # Оновлення інтерфейсу після виконання нецільових дій
+    try:
+        await callback.message.edit_text(format_personal_card(char), reply_markup=get_reveal_keyboard(room_id, char), parse_mode="HTML")
+    except Exception:
+        pass
+    await update_live_dashboards(room_id)
+
 
 @dp.callback_query(F.data.startswith("act_target:"))
 async def process_action_target(callback: types.CallbackQuery):
@@ -485,16 +482,33 @@ async def process_action_target(callback: types.CallbackQuery):
 
     elif act_type == "CHECK":
         all_info = "\n".join([f"• {label}: {target_char[key]}" for key, label in LABELS.items()])
-        await callback.message.edit_text(f"🔍 <b>Розвідка про {target_name}:</b>\n\n{html.escape(all_info)}", parse_mode="HTML")
-        actor_char["action_used"] = True
-        return
+        msg = f"🔍 <b>{actor_name}</b> провів розвідку щодо {target_name}."
+        await callback.message.answer(f"🔍 <b>Розвідка про {target_name}:</b>\n\n{html.escape(all_info)}", parse_mode="HTML")
 
     elif act_type == "SILENCE":
         target_char["is_silenced"] = True
         msg = f"🔇 <b>{actor_name}</b> змусив замовкнути <b>{target_name}</b> на цей раунд!"
 
     actor_char["action_used"] = True
-    await callback.message.edit_text(f"✅ Дія виконана: {msg}", parse_mode="HTML")
+
+    # Оновлюємо картку того, хто викликав дію
+    try:
+        await callback.message.edit_text(format_personal_card(actor_char), reply_markup=get_reveal_keyboard(room_id, actor_char), parse_mode="HTML")
+    except Exception:
+        pass
+
+    # Також оновлюємо закриплену картку цілі, якщо в неї щось змінилося (наприклад, багаж чи здоров'я)
+    if target.get("card_message_id"):
+        try:
+            await bot.edit_message_text(
+                chat_id=target_id,
+                message_id=target["card_message_id"],
+                text=format_personal_card(target_char),
+                reply_markup=get_reveal_keyboard(room_id, target_char),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
 
     broadcast_tasks = [
         bot.send_message(p_id, f"⚡ <b>ПОДІЯ:</b> {msg}", parse_mode="HTML")
