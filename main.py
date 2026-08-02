@@ -4,7 +4,7 @@ import logging
 import html
 import asyncio
 import secrets
-from typing import Dict
+from typing import Dict, List, Optional
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
@@ -658,6 +658,19 @@ async def init_vote(callback: types.CallbackQuery):
         return
 
     room["status"] = "voting"
+    # Скидаємо список кандидатів на переголосування, якщо це новий раунд
+    room.pop("revote_candidates", None)
+
+    await start_voting_phase(room_id)
+
+
+async def start_voting_phase(
+    room_id: str, revote_candidates: Optional[List[int]] = None
+):
+    """Функція для запуску або перезапуску (переголосування) фази голосування."""
+    room = ROOMS.get(room_id)
+    if not room:
+        return
 
     eligible_voters = {
         k: v
@@ -665,14 +678,23 @@ async def init_vote(callback: types.CallbackQuery):
         if not v.get("is_spectator", False) or v.get("is_ghost_voter", False)
     }
 
+    # Скидаємо лічильники голосів перед початком
     for p_id in room["players"].keys():
         room["players"][p_id]["votes"] = 0
         room["players"][p_id]["voted_against"] = []
         room["players"][p_id]["voted"] = False
 
-    alive_targets = {
-        k: v for k, v in room["players"].items() if not v.get("is_spectator", False)
-    }
+    # Якщо це переголосування — вибирати можна тільки з candidates, інакше — з усіх живих
+    if revote_candidates:
+        alive_targets = {
+            k: v
+            for k, v in room["players"].items()
+            if k in revote_candidates and not v.get("is_spectator", False)
+        }
+    else:
+        alive_targets = {
+            k: v for k, v in room["players"].items() if not v.get("is_spectator", False)
+        }
 
     for p_id, p_data in eligible_voters.items():
         if p_data["character"].get("is_silenced"):
@@ -694,10 +716,15 @@ async def init_vote(callback: types.CallbackQuery):
         builder.adjust(1)
 
         prefix = (
-            "👻 <b>ГОЛОСУВАННЯ ПРИВИДА</b>\n"
-            if p_data.get("is_ghost_voter")
-            else f"🗳️ <b>ГОЛОСУВАННЯ РАУНДУ {room['round']}</b>\n"
+            "⚖️ <b>ПЕРЕГОЛОСУВАННЯ!</b>\nОберіть серед тих, хто набрав однакову кількість голосів:\n"
+            if revote_candidates
+            else (
+                "👻 <b>ГОЛОСУВАННЯ ПРИВИДА</b>\n"
+                if p_data.get("is_ghost_voter")
+                else f"🗳️ <b>ГОЛОСУВАННЯ РАУНДУ {room['round']}</b>\n"
+            )
         )
+
         await bot.send_message(
             p_id,
             f"{prefix}Оберіть, кого вигнати з бункера:",
@@ -746,6 +773,7 @@ async def process_vote(callback: types.CallbackQuery):
             k: v for k, v in room["players"].items() if not v.get("is_spectator", False)
         }
 
+        # Застосування пасивних захисних/дзеркальних здібностей
         for pid, pdata in alive_players.items():
             char = pdata["character"]
             if char.get("cancel_votes"):
@@ -768,22 +796,57 @@ async def process_vote(callback: types.CallbackQuery):
             elif pdata["votes"] == max_votes:
                 candidates.append(pid)
 
+        # ------------------ ЛОГІКА ПЕРЕГОЛОСУВАННЯ ------------------
         if not candidates or max_votes <= 0:
             for p_id in room["players"].keys():
                 await bot.send_message(
                     p_id,
-                    "🤝 <b>Голосування завершилося внічию/без голосів. Нікого не вигнано!</b>",
+                    "🤝 <b>Ніхто не отримав голосів. Нікого не вигнано!</b>",
                     parse_mode="HTML",
                 )
+
+        elif len(candidates) > 1:
+            # Декілька гравців мають однакову максимальну кількість голосів
+            candidate_names = ", ".join(
+                [
+                    f"<b>{html.escape(room['players'][c]['name'])}</b>"
+                    for c in candidates
+                ]
+            )
+
+            # Якщо це вже було переголосування між тими самими людьми — нікого не виганяємо
+            if room.get("revote_candidates") == candidates:
+                for p_id in room["players"].keys():
+                    await bot.send_message(
+                        p_id,
+                        f"⚖️ <b>Повторне переголосування знову завершилося нічиєю між {candidate_names}!</b>\nУ цьому раунді нікого не вигнано.",
+                        parse_mode="HTML",
+                    )
+                room.pop("revote_candidates", None)
+            else:
+                room["revote_candidates"] = candidates
+                for p_id in room["players"].keys():
+                    await bot.send_message(
+                        p_id,
+                        f"⚠️ <b>Нічия!</b> Гравці {candidate_names} набрали однакову кількість голосів ({max_votes}).\n\n🔄 <b>Оголошується ПЕРЕГОЛОСУВАННЯ між ними!</b>",
+                        parse_mode="HTML",
+                    )
+                # Перезапускаємо голосування тільки для цих кандидатів
+                await start_voting_phase(room_id, revote_candidates=candidates)
+                return
+
         else:
-            kicked_id = random.choice(candidates)
+            # Чіткий лідер для вигнання
+            kicked_id = candidates[0]
             kicked_player = room["players"][kicked_id]
             kicked_player["is_spectator"] = True
+            room.pop("revote_candidates", None)
 
             cond = kicked_player["character"]["condition"]
             kicked_name = html.escape(kicked_player["name"])
             cond_msg = f"🚪 <b>{kicked_name}</b> вибуває з бункера!\n\n⚠️ <b>СПРАЦЮВАВ ЗАПОВІТ:</b>\n<i>{html.escape(cond['desc'])}</i>"
 
+            # (Логіка заповітів залишилася без змін)
             if cond["type"] == "PLAGUE_VOTERS":
                 for voter_pid in kicked_player["voted_against"]:
                     if voter_pid in room["players"]:
@@ -887,6 +950,7 @@ async def process_vote(callback: types.CallbackQuery):
             ]
             await asyncio.gather(*broadcast_tasks, return_exceptions=True)
 
+        # Скидання одноразових ефектів раунду
         for pdata in room["players"].values():
             pdata["character"]["is_protected"] = False
             pdata["character"]["double_vote"] = False
@@ -896,6 +960,7 @@ async def process_vote(callback: types.CallbackQuery):
 
         await update_live_dashboards(room_id)
 
+        # Перевірка умови фіналу гри
         current_alive = [
             v for v in room["players"].values() if not v.get("is_spectator", False)
         ]
