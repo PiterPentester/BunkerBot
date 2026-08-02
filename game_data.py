@@ -423,12 +423,13 @@ def evaluate_survival(apocalypse_name: str, alive_players: List[dict], bunker_in
         fact = str(char["fact"]).lower()
 
         is_fertile = "безплід" not in health and "безплід" not in fact
-
-        if age_at_exit >= 16 and is_fertile:
-            if gender == "Чоловік":
-                adult_males.append(f"{name} (досяг {age_at_exit} р.)")
-            elif gender == "Жінка":
-                adult_females.append(f"{name} (досягла {age_at_exit} р.)")
+        if is_fertile:
+            max_age = 60 if gender == "Чоловік" else 45
+            match gender:
+                case "Чоловік" if 16 <= age_at_exit and char["age"] <= max_age:
+                    adult_males.append(f"{name} (зараз {char["age"]}, досяг {age_at_exit} р.)")
+                case "Жінка" if 16 <= age_at_exit and char["age"] <= max_age:
+                    adult_females.append(f"{name} (зараз {char["age"]}, досягла {age_at_exit} р.)")
 
         if any(h in health for h in ["хвороба", "чума", "діабет", "астма"]):
             sick_players.append(name)
