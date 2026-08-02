@@ -15,3 +15,10 @@ dependencies = [
 pythonpath = [
   "."
 ]
+
+[tool.bandit]
+exclude_dirs = [".venv", "tests"]
+skips = [
+    "B311", # Standard pseudo-random generators are not suitable for security/cryptographic purposes.
+    "B110", # Try, Except, Pass detected.
+]

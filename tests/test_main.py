@@ -8,13 +8,15 @@ from main import (
     process_total_players,
     process_bunker_seats,
     use_action,
-    generate_character
+    generate_character,
 )
+
 
 @pytest.fixture(autouse=True)
 def clear_rooms():
     """Очищає словник кімнат перед кожним тестом."""
     ROOMS.clear()
+
 
 @pytest.fixture
 def mock_message():
@@ -24,6 +26,7 @@ def mock_message():
     msg.from_user.full_name = "Test User"
     msg.answer = AsyncMock()
     return msg
+
 
 @pytest.fixture
 def mock_state():
@@ -42,6 +45,7 @@ def mock_state():
     state.clear = AsyncMock()
     state.set_state = AsyncMock()
     return state
+
 
 @pytest.mark.asyncio
 async def test_create_room_fsm_flow(mock_message, mock_state):
@@ -66,6 +70,7 @@ async def test_create_room_fsm_flow(mock_message, mock_state):
     assert room["host_id"] == 12345
     assert 12345 in room["players"]
 
+
 @pytest.mark.asyncio
 async def test_action_sabotage():
     """Тест дії 'Саботаж' — зменшення кількості місць у бункері."""
@@ -74,18 +79,18 @@ async def test_action_sabotage():
 
     # Використовуємо повну структуру персонажа
     character = generate_character()
-    character["action"] = {"type": "SABOTAGE", "name": "Саботаж", "desc": "Зменшує місця"}
+    character["action"] = {
+        "type": "SABOTAGE",
+        "name": "Саботаж",
+        "desc": "Зменшує місця",
+    }
     character["action_used"] = False
 
     ROOMS[room_id] = {
         "bunker_seats": 4,
         "players": {
-            user_id: {
-                "name": "Saboteur",
-                "character": character,
-                "is_spectator": False
-            }
-        }
+            user_id: {"name": "Saboteur", "character": character, "is_spectator": False}
+        },
     }
 
     callback = AsyncMock()

@@ -4,7 +4,7 @@ import logging
 import html
 import asyncio
 import secrets
-from typing import Dict, Any, List, Optional
+from typing import Dict
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
@@ -19,8 +19,6 @@ from game_data import (
     APOCALYPSES,
     PROFESSIONS,
     HOBBIES,
-    TRAITS,
-    FACTS,
     LABELS,
     generate_character,
     generate_bunker_info,
@@ -28,48 +26,69 @@ from game_data import (
 )
 
 # Налаштування логування
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 API_TOKEN = os.getenv("TG_API_TOKEN")
 
 if not API_TOKEN:
-    logger.warning("TG_API_TOKEN не знайдено в змінних середовища! Перевірте файл .env.")
+    logger.warning(
+        "TG_API_TOKEN не знайдено в змінних середовища! Перевірте файл .env."
+    )
 
 ROOMS: Dict[str, dict] = {}
+
 
 class CreateRoomState(StatesGroup):
     waiting_for_total_players = State()
     waiting_for_bunker_seats = State()
 
+
 bot = Bot(token=API_TOKEN if API_TOKEN else "123456:DummyToken")
 dp = Dispatcher(storage=MemoryStorage())
+
 
 def get_start_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="Створити гру 🎲", callback_data="init_room")
     return builder.as_markup()
 
+
 def get_new_game_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔄 Розпочати нову гру", callback_data="init_room")
     return builder.as_markup()
+
 
 def get_reveal_keyboard(room_id: str, character: dict, is_alive: bool = True):
     builder = InlineKeyboardBuilder()
     if is_alive:
         for key, label in LABELS.items():
             if key not in character["opened"]:
-                builder.button(text=f"Відкрити {label}", callback_data=f"rev:{room_id}:{key}")
+                builder.button(
+                    text=f"Відкрити {label}", callback_data=f"rev:{room_id}:{key}"
+                )
         builder.adjust(2)
 
         if not character.get("action_used", False):
             act = character["action"]
-            builder.row(types.InlineKeyboardButton(text=f"⚡ Застосувати дію: {act['name']}", callback_data=f"use_act:{room_id}"))
+            builder.row(
+                types.InlineKeyboardButton(
+                    text=f"⚡ Застосувати дію: {act['name']}",
+                    callback_data=f"use_act:{room_id}",
+                )
+            )
 
-        builder.row(types.InlineKeyboardButton(text="🗳️ Почати голосування раунду", callback_data=f"init_vote:{room_id}"))
+        builder.row(
+            types.InlineKeyboardButton(
+                text="🗳️ Почати голосування раунду", callback_data=f"init_vote:{room_id}"
+            )
+        )
     return builder.as_markup()
+
 
 def format_personal_card(character: dict) -> str:
     act = character["action"]
@@ -89,6 +108,7 @@ def format_personal_card(character: dict) -> str:
         f"⚠️ <b>Твій заповіт (умова вибування):</b>\n<i>{html.escape(cond['desc'])}</i>\n"
     )
 
+
 async def update_live_dashboards(room_id: str):
     room = ROOMS.get(room_id)
     if not room:
@@ -96,7 +116,9 @@ async def update_live_dashboards(room_id: str):
 
     apoc = APOCALYPSES[room["apocalypse"]]
     bunker = room["bunker_info"]
-    alive_players = {k: v for k, v in room["players"].items() if not v.get("is_spectator", False)}
+    alive_players = {
+        k: v for k, v in room["players"].items() if not v.get("is_spectator", False)
+    }
 
     dash_text = (
         f"🌋 <b>АПОКАЛІПСИС: {html.escape(room['apocalypse'])}</b>\n"
@@ -111,7 +133,7 @@ async def update_live_dashboards(room_id: str):
     )
 
     for p_id, p_data in alive_players.items():
-        p_name = html.escape(p_data['name'])
+        p_name = html.escape(p_data["name"])
         dash_text += f"👤 <b>{p_name}</b>"
         if p_data["character"].get("is_protected"):
             dash_text += " 🛡️"
@@ -126,18 +148,27 @@ async def update_live_dashboards(room_id: str):
         dash_text += "\n"
 
     async def _update_single_player(p_id: int, p_data: dict):
-        text_to_send = dash_text if not p_data.get("is_spectator", False) else "👁️ <b>Режим спостерігача</b>\n\n" + dash_text
+        text_to_send = (
+            dash_text
+            if not p_data.get("is_spectator", False)
+            else "👁️ <b>Режим спостерігача</b>\n\n" + dash_text
+        )
         msg_id = p_data.get("dash_message_id")
 
         if msg_id:
             try:
                 await bot.edit_message_text(
-                    chat_id=p_id, message_id=msg_id, text=text_to_send, parse_mode="HTML"
+                    chat_id=p_id,
+                    message_id=msg_id,
+                    text=text_to_send,
+                    parse_mode="HTML",
                 )
             except TelegramBadRequest as e:
                 if "message is not modified" not in str(e).lower():
                     try:
-                        sent_msg = await bot.send_message(p_id, text_to_send, parse_mode="HTML")
+                        sent_msg = await bot.send_message(
+                            p_id, text_to_send, parse_mode="HTML"
+                        )
                         p_data["dash_message_id"] = sent_msg.message_id
                     except Exception:
                         pass
@@ -150,8 +181,11 @@ async def update_live_dashboards(room_id: str):
             except Exception:
                 pass
 
-    tasks = [_update_single_player(p_id, p_data) for p_id, p_data in room["players"].items()]
+    tasks = [
+        _update_single_player(p_id, p_data) for p_id, p_data in room["players"].items()
+    ]
     await asyncio.gather(*tasks, return_exceptions=True)
+
 
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message, command: CommandObject, state: FSMContext):
@@ -179,23 +213,34 @@ async def start_cmd(message: types.Message, command: CommandObject, state: FSMCo
                 "dash_message_id": None,
                 "card_message_id": None,
                 "is_spectator": False,
-                "is_ghost_voter": False
+                "is_ghost_voter": False,
             }
-            await message.answer(f"✅ Ви приєдналися до гри ({len(room['players'])}/{room['max_players']})!")
+            await message.answer(
+                f"✅ Ви приєдналися до гри ({len(room['players'])}/{room['max_players']})!"
+            )
             await bot.send_message(
                 room["host_id"],
                 f"➕ Гравець <b>{html.escape(message.from_user.full_name)}</b> приєднався! ({len(room['players'])}/{room['max_players']})",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
         return
 
-    await message.answer("Ласкаво просимо до гри <b>Бункер</b>!", reply_markup=get_start_keyboard(), parse_mode="HTML")
+    await message.answer(
+        "Ласкаво просимо до гри <b>Бункер</b>!",
+        reply_markup=get_start_keyboard(),
+        parse_mode="HTML",
+    )
+
 
 @dp.callback_query(F.data == "init_room")
 async def init_room_creation(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state(CreateRoomState.waiting_for_total_players)
-    await callback.message.answer("👥 Надішли <b>загальну кількість гравців</b> (наприклад, <code>6</code>):", parse_mode="HTML")
+    await callback.message.answer(
+        "👥 Надішли <b>загальну кількість гравців</b> (наприклад, <code>6</code>):",
+        parse_mode="HTML",
+    )
+
 
 @dp.message(CreateRoomState.waiting_for_total_players)
 async def process_total_players(message: types.Message, state: FSMContext):
@@ -206,14 +251,22 @@ async def process_total_players(message: types.Message, state: FSMContext):
     total_players = int(message.text)
     await state.update_data(total_players=total_players)
     await state.set_state(CreateRoomState.waiting_for_bunker_seats)
-    await message.answer(f"🔒 Скільки людей <b>зможе вижити в бункері</b>? (Має бути менше ніж {total_players}):", parse_mode="HTML")
+    await message.answer(
+        f"🔒 Скільки людей <b>зможе вижити в бункері</b>? (Має бути менше ніж {total_players}):",
+        parse_mode="HTML",
+    )
+
 
 @dp.message(CreateRoomState.waiting_for_bunker_seats)
 async def process_bunker_seats(message: types.Message, state: FSMContext):
     data = await state.get_data()
     total_players = data["total_players"]
 
-    if not message.text.isdigit() or int(message.text) >= total_players or int(message.text) < 1:
+    if (
+        not message.text.isdigit()
+        or int(message.text) >= total_players
+        or int(message.text) < 1
+    ):
         await message.answer(f"❌ Число має бути від 1 до {total_players - 1}.")
         return
 
@@ -240,11 +293,11 @@ async def process_bunker_seats(message: types.Message, state: FSMContext):
                 "dash_message_id": None,
                 "card_message_id": None,
                 "is_spectator": False,
-                "is_ghost_voter": False
+                "is_ghost_voter": False,
             }
         },
         "status": "waiting",
-        "round": 1
+        "round": 1,
     }
 
     bot_info = await bot.get_me()
@@ -262,8 +315,10 @@ async def process_bunker_seats(message: types.Message, state: FSMContext):
         f"👥 Гравців: <b>{total_players}</b>\n"
         f"🔒 Місць у бункері: <b>{bunker_seats}</b>\n\n"
         f"🔗 Надішли це посилання учасникам:\n<code>{invite_link}</code>",
-        reply_markup=builder.as_markup(), parse_mode="HTML"
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
     )
+
 
 @dp.callback_query(F.data.startswith("start_game:"))
 async def start_game(callback: types.CallbackQuery):
@@ -284,12 +339,15 @@ async def start_game(callback: types.CallbackQuery):
     for player_id, p_data in room["players"].items():
         char = p_data["character"]
         pinned_msg = await bot.send_message(
-            player_id, format_personal_card(char),
-            reply_markup=get_reveal_keyboard(room_id, char), parse_mode="HTML"
+            player_id,
+            format_personal_card(char),
+            reply_markup=get_reveal_keyboard(room_id, char),
+            parse_mode="HTML",
         )
         p_data["card_message_id"] = pinned_msg.message_id
 
     await update_live_dashboards(room_id)
+
 
 @dp.callback_query(F.data.startswith("rev:"))
 async def process_reveal(callback: types.CallbackQuery):
@@ -309,17 +367,27 @@ async def process_reveal(callback: types.CallbackQuery):
         char["opened"].append(trait_key)
         await callback.answer("Характеристику розкрито!")
         try:
-            await callback.message.edit_reply_markup(reply_markup=get_reveal_keyboard(room_id, char))
+            await callback.message.edit_reply_markup(
+                reply_markup=get_reveal_keyboard(room_id, char)
+            )
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e).lower():
                 raise
         await update_live_dashboards(room_id)
 
+
 # Перелік дій, які вимагають вибору цілі (іншого гравця)
 TARGETED_ACTIONS = {
-    "SWAP_BAG", "SWAP_HEALTH", "SWAP_PROF", "SWAP_HOBBY",
-    "INFECT", "STEAL_BAG", "CHECK", "SILENCE"
+    "SWAP_BAG",
+    "SWAP_HEALTH",
+    "SWAP_PROF",
+    "SWAP_HOBBY",
+    "INFECT",
+    "STEAL_BAG",
+    "CHECK",
+    "SILENCE",
 }
+
 
 @dp.callback_query(F.data.startswith("use_act:"))
 async def use_action(callback: types.CallbackQuery):
@@ -347,72 +415,107 @@ async def use_action(callback: types.CallbackQuery):
     if act_type == "SABOTAGE":
         room["bunker_seats"] = max(1, room["bunker_seats"] - 1)
         char["action_used"] = True
-        await callback.message.answer("💥 <b>Ви вчинили саботаж!</b> Кількість місць у бункері зменшено на 1.", parse_mode="HTML")
+        await callback.message.answer(
+            "💥 <b>Ви вчинили саботаж!</b> Кількість місць у бункері зменшено на 1.",
+            parse_mode="HTML",
+        )
 
     elif act_type == "ADD_SEAT":
         room["bunker_seats"] += 1
         char["action_used"] = True
-        await callback.message.answer("🛠️ <b>Ви відремонтували бункер!</b> Додано +1 місце.", parse_mode="HTML")
+        await callback.message.answer(
+            "🛠️ <b>Ви відремонтували бункер!</b> Додано +1 місце.", parse_mode="HTML"
+        )
 
     elif act_type == "HEAL":
         char["health"] = "Повністю здоровий(а)"
         char["action_used"] = True
-        await callback.message.answer("💉 <b>Ви використали ліки!</b> Тепер ви повністю здорові.", parse_mode="HTML")
+        await callback.message.answer(
+            "💉 <b>Ви використали ліки!</b> Тепер ви повністю здорові.",
+            parse_mode="HTML",
+        )
 
     elif act_type == "PROTECT":
         char["is_protected"] = True
         char["action_used"] = True
-        await callback.message.answer("🛡️ <b>Штурмовий щит активовано!</b> Ви захищені від вигнання у цьому раунді.", parse_mode="HTML")
+        await callback.message.answer(
+            "🛡️ <b>Штурмовий щит активовано!</b> Ви захищені від вигнання у цьому раунді.",
+            parse_mode="HTML",
+        )
 
     elif act_type == "DOUBLE_VOTE":
         char["double_vote"] = True
         char["action_used"] = True
-        await callback.message.answer("🗳️ <b>Ваш голос у цьому раунді буде вираховуватися за два!</b>", parse_mode="HTML")
+        await callback.message.answer(
+            "🗳️ <b>Ваш голос у цьому раунді буде вираховуватися за два!</b>",
+            parse_mode="HTML",
+        )
 
     elif act_type == "REVEAL_ALL":
         char["action_used"] = True
         for p_id, p_data in room["players"].items():
             if not p_data.get("is_spectator"):
-                unopened = [k for k in LABELS.keys() if k not in p_data["character"]["opened"]]
+                unopened = [
+                    k for k in LABELS.keys() if k not in p_data["character"]["opened"]
+                ]
                 if unopened:
                     p_data["character"]["opened"].append(random.choice(unopened))
-        await callback.message.answer("📢 <b>Викривач!</b> Відкрито по 1 прихованій характеристиці кожного гравця.", parse_mode="HTML")
+        await callback.message.answer(
+            "📢 <b>Викривач!</b> Відкрито по 1 прихованій характеристиці кожного гравця.",
+            parse_mode="HTML",
+        )
 
     elif act_type == "REROLL_SELF":
         char["profession"] = random.choice(PROFESSIONS)
         char["hobby"] = random.choice(HOBBIES)
         char["action_used"] = True
-        await callback.message.answer(f"🎭 <b>Особистість змінено!</b> Нова професія: {char['profession']}, Хобі: {char['hobby']}", parse_mode="HTML")
+        await callback.message.answer(
+            f"🎭 <b>Особистість змінено!</b> Нова професія: {char['profession']}, Хобі: {char['hobby']}",
+            parse_mode="HTML",
+        )
 
     elif act_type == "REFLECT_VOTE":
         char["reflect_vote"] = True
         char["action_used"] = True
-        await callback.message.answer("🃏 <b>Дзеркальний щит активовано!</b> Голоси проти вас повернуться тим, хто проголосував.", parse_mode="HTML")
+        await callback.message.answer(
+            "🃏 <b>Дзеркальний щит активовано!</b> Голоси проти вас повернуться тим, хто проголосував.",
+            parse_mode="HTML",
+        )
 
     elif act_type == "CANCEL_VOTES":
         char["cancel_votes"] = True
         char["action_used"] = True
-        await callback.message.answer("🕊️ <b>Амністія!</b> Усі голоси проти вас у цьому раунді будуть анульовані.", parse_mode="HTML")
+        await callback.message.answer(
+            "🕊️ <b>Амністія!</b> Усі голоси проти вас у цьому раунді будуть анульовані.",
+            parse_mode="HTML",
+        )
 
     # --- ЦІЛЬОВІ ДІЇ ---
     elif act_type in TARGETED_ACTIONS:
-        alive_players = {k: v for k, v in room["players"].items() if not v.get("is_spectator", False) and k != user_id}
+        alive_players = {
+            k: v
+            for k, v in room["players"].items()
+            if not v.get("is_spectator", False) and k != user_id
+        }
 
         if not alive_players:
-            await callback.answer("Немає доступних цілей для цієї дії!", show_alert=True)
+            await callback.answer(
+                "Немає доступних цілей для цієї дії!", show_alert=True
+            )
             return
 
         builder = InlineKeyboardBuilder()
         for target_id, target_data in alive_players.items():
             builder.button(
                 text=target_data["name"],
-                callback_data=f"act_target:{room_id}:{act_type}:{target_id}"
+                callback_data=f"act_target:{room_id}:{act_type}:{target_id}",
             )
         builder.adjust(1)
 
         await callback.message.answer(
             f"🎯 <b>Обери ціль для дії '{html.escape(act['name'])}':</b>",
-            reply_markup=builder.as_markup(), parse_mode="HTML"
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
         )
         return
     else:
@@ -421,7 +524,11 @@ async def use_action(callback: types.CallbackQuery):
 
     # Оновлення інтерфейсу після виконання нецільових дій
     try:
-        await callback.message.edit_text(format_personal_card(char), reply_markup=get_reveal_keyboard(room_id, char), parse_mode="HTML")
+        await callback.message.edit_text(
+            format_personal_card(char),
+            reply_markup=get_reveal_keyboard(room_id, char),
+            parse_mode="HTML",
+        )
     except Exception:
         pass
     await update_live_dashboards(room_id)
@@ -452,23 +559,37 @@ async def process_action_target(callback: types.CallbackQuery):
         return
 
     msg = ""
-    actor_name = html.escape(actor['name'])
-    target_name = html.escape(target['name'])
+    actor_name = html.escape(actor["name"])
+    target_name = html.escape(target["name"])
 
     if act_type == "SWAP_BAG":
-        actor_char["baggage"], target_char["baggage"] = target_char["baggage"], actor_char["baggage"]
+        actor_char["baggage"], target_char["baggage"] = (
+            target_char["baggage"],
+            actor_char["baggage"],
+        )
         msg = f"🔄 <b>{actor_name}</b> обмінявся багажем із <b>{target_name}</b>!"
 
     elif act_type == "SWAP_HEALTH":
-        actor_char["health"], target_char["health"] = target_char["health"], actor_char["health"]
-        msg = f"🧬 <b>{actor_name}</b> обмінявся станом здоров'я з <b>{target_name}</b>!"
+        actor_char["health"], target_char["health"] = (
+            target_char["health"],
+            actor_char["health"],
+        )
+        msg = (
+            f"🧬 <b>{actor_name}</b> обмінявся станом здоров'я з <b>{target_name}</b>!"
+        )
 
     elif act_type == "SWAP_PROF":
-        actor_char["profession"], target_char["profession"] = target_char["profession"], actor_char["profession"]
+        actor_char["profession"], target_char["profession"] = (
+            target_char["profession"],
+            actor_char["profession"],
+        )
         msg = f"💼 <b>{actor_name}</b> обмінявся професією з <b>{target_name}</b>!"
 
     elif act_type == "SWAP_HOBBY":
-        actor_char["hobby"], target_char["hobby"] = target_char["hobby"], actor_char["hobby"]
+        actor_char["hobby"], target_char["hobby"] = (
+            target_char["hobby"],
+            actor_char["hobby"],
+        )
         msg = f"🎨 <b>{actor_name}</b> обмінявся хобі з <b>{target_name}</b>!"
 
     elif act_type == "INFECT":
@@ -481,9 +602,14 @@ async def process_action_target(callback: types.CallbackQuery):
         msg = f"🎒 <b>{actor_name}</b> викрав багаж у <b>{target_name}</b>!"
 
     elif act_type == "CHECK":
-        all_info = "\n".join([f"• {label}: {target_char[key]}" for key, label in LABELS.items()])
+        all_info = "\n".join(
+            [f"• {label}: {target_char[key]}" for key, label in LABELS.items()]
+        )
         msg = f"🔍 <b>{actor_name}</b> провів розвідку щодо {target_name}."
-        await callback.message.answer(f"🔍 <b>Розвідка про {target_name}:</b>\n\n{html.escape(all_info)}", parse_mode="HTML")
+        await callback.message.answer(
+            f"🔍 <b>Розвідка про {target_name}:</b>\n\n{html.escape(all_info)}",
+            parse_mode="HTML",
+        )
 
     elif act_type == "SILENCE":
         target_char["is_silenced"] = True
@@ -493,7 +619,11 @@ async def process_action_target(callback: types.CallbackQuery):
 
     # Оновлюємо картку того, хто викликав дію
     try:
-        await callback.message.edit_text(format_personal_card(actor_char), reply_markup=get_reveal_keyboard(room_id, actor_char), parse_mode="HTML")
+        await callback.message.edit_text(
+            format_personal_card(actor_char),
+            reply_markup=get_reveal_keyboard(room_id, actor_char),
+            parse_mode="HTML",
+        )
     except Exception:
         pass
 
@@ -505,7 +635,7 @@ async def process_action_target(callback: types.CallbackQuery):
                 message_id=target["card_message_id"],
                 text=format_personal_card(target_char),
                 reply_markup=get_reveal_keyboard(room_id, target_char),
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
         except Exception:
             pass
@@ -518,6 +648,7 @@ async def process_action_target(callback: types.CallbackQuery):
 
     await update_live_dashboards(room_id)
 
+
 @dp.callback_query(F.data.startswith("init_vote:"))
 async def init_vote(callback: types.CallbackQuery):
     room_id = callback.data.split(":")[1]
@@ -529,7 +660,8 @@ async def init_vote(callback: types.CallbackQuery):
     room["status"] = "voting"
 
     eligible_voters = {
-        k: v for k, v in room["players"].items()
+        k: v
+        for k, v in room["players"].items()
         if not v.get("is_spectator", False) or v.get("is_ghost_voter", False)
     }
 
@@ -538,22 +670,41 @@ async def init_vote(callback: types.CallbackQuery):
         room["players"][p_id]["voted_against"] = []
         room["players"][p_id]["voted"] = False
 
-    alive_targets = {k: v for k, v in room["players"].items() if not v.get("is_spectator", False)}
+    alive_targets = {
+        k: v for k, v in room["players"].items() if not v.get("is_spectator", False)
+    }
 
     for p_id, p_data in eligible_voters.items():
         if p_data["character"].get("is_silenced"):
-            await bot.send_message(p_id, "🔇 <b>Вас заглушено у цьому раунді. Ви не можете голосувати!</b>", parse_mode="HTML")
+            await bot.send_message(
+                p_id,
+                "🔇 <b>Вас заглушено у цьому раунді. Ви не можете голосувати!</b>",
+                parse_mode="HTML",
+            )
             p_data["voted"] = True
             continue
 
         builder = InlineKeyboardBuilder()
         for target_id, target_data in alive_targets.items():
             if target_id != p_id:
-                builder.button(text=target_data["name"], callback_data=f"vote:{room_id}:{target_id}")
+                builder.button(
+                    text=target_data["name"],
+                    callback_data=f"vote:{room_id}:{target_id}",
+                )
         builder.adjust(1)
 
-        prefix = "👻 <b>ГОЛОСУВАННЯ ПРИВИДА</b>\n" if p_data.get("is_ghost_voter") else f"🗳️ <b>ГОЛОСУВАННЯ РАУНДУ {room['round']}</b>\n"
-        await bot.send_message(p_id, f"{prefix}Оберіть, кого вигнати з бункера:", reply_markup=builder.as_markup(), parse_mode="HTML")
+        prefix = (
+            "👻 <b>ГОЛОСУВАННЯ ПРИВИДА</b>\n"
+            if p_data.get("is_ghost_voter")
+            else f"🗳️ <b>ГОЛОСУВАННЯ РАУНДУ {room['round']}</b>\n"
+        )
+        await bot.send_message(
+            p_id,
+            f"{prefix}Оберіть, кого вигнати з бункера:",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+
 
 @dp.callback_query(F.data.startswith("vote:"))
 async def process_vote(callback: types.CallbackQuery):
@@ -568,7 +719,9 @@ async def process_vote(callback: types.CallbackQuery):
     voter = room["players"].get(voter_id)
 
     if not voter or voter.get("voted"):
-        await callback.answer("Ви вже проголосували або не можете голосувати!", show_alert=True)
+        await callback.answer(
+            "Ви вже проголосували або не можете голосувати!", show_alert=True
+        )
         return
 
     voter["voted"] = True
@@ -583,12 +736,15 @@ async def process_vote(callback: types.CallbackQuery):
     await callback.message.edit_text("👌 Голос зараховано.")
 
     voters_in_round = [
-        p for p in room["players"].values()
+        p
+        for p in room["players"].values()
         if not p.get("is_spectator", False) or p.get("is_ghost_voter", False)
     ]
 
     if all(p["voted"] for p in voters_in_round):
-        alive_players = {k: v for k, v in room["players"].items() if not v.get("is_spectator", False)}
+        alive_players = {
+            k: v for k, v in room["players"].items() if not v.get("is_spectator", False)
+        }
 
         for pid, pdata in alive_players.items():
             char = pdata["character"]
@@ -614,27 +770,39 @@ async def process_vote(callback: types.CallbackQuery):
 
         if not candidates or max_votes <= 0:
             for p_id in room["players"].keys():
-                await bot.send_message(p_id, "🤝 <b>Голосування завершилося внічию/без голосів. Нікого не вигнано!</b>", parse_mode="HTML")
+                await bot.send_message(
+                    p_id,
+                    "🤝 <b>Голосування завершилося внічию/без голосів. Нікого не вигнано!</b>",
+                    parse_mode="HTML",
+                )
         else:
             kicked_id = random.choice(candidates)
             kicked_player = room["players"][kicked_id]
             kicked_player["is_spectator"] = True
 
             cond = kicked_player["character"]["condition"]
-            kicked_name = html.escape(kicked_player['name'])
+            kicked_name = html.escape(kicked_player["name"])
             cond_msg = f"🚪 <b>{kicked_name}</b> вибуває з бункера!\n\n⚠️ <b>СПРАЦЮВАВ ЗАПОВІТ:</b>\n<i>{html.escape(cond['desc'])}</i>"
 
             if cond["type"] == "PLAGUE_VOTERS":
                 for voter_pid in kicked_player["voted_against"]:
                     if voter_pid in room["players"]:
-                        room["players"][voter_pid]["character"]["health"] = "Смертельна чума"
-                cond_msg += "\n☠️ <i>Усі, хто проголосував проти нього, заразилися чумою!</i>"
+                        room["players"][voter_pid]["character"]["health"] = (
+                            "Смертельна чума"
+                        )
+                cond_msg += (
+                    "\n☠️ <i>Усі, хто проголосував проти нього, заразилися чумою!</i>"
+                )
 
             elif cond["type"] == "INFECT_VOTERS":
                 for voter_pid in kicked_player["voted_against"]:
                     if voter_pid in room["players"]:
-                        room["players"][voter_pid]["character"]["health"] = "Легка застуда"
-                cond_msg += "\n🤧 <i>Усі, хто проголосував проти нього, підхопили застуду!</i>"
+                        room["players"][voter_pid]["character"]["health"] = (
+                            "Легка застуда"
+                        )
+                cond_msg += (
+                    "\n🤧 <i>Усі, хто проголосував проти нього, підхопили застуду!</i>"
+                )
 
             elif cond["type"] == "DESTROY_BAG":
                 kicked_player["character"]["baggage"] = "Знищено при вигнанні"
@@ -649,22 +817,32 @@ async def process_vote(callback: types.CallbackQuery):
 
             elif cond["type"] == "DROP_KEY":
                 room["bunker_seats"] += 1
-                cond_msg += "\n🗝️ <i>Гравець залишив ключ! Додано +1 місце в бункері.</i>"
+                cond_msg += (
+                    "\n🗝️ <i>Гравець залишив ключ! Додано +1 місце в бункері.</i>"
+                )
 
             elif cond["type"] == "BLIND_VOTERS":
                 for voter_pid in kicked_player["voted_against"]:
                     if voter_pid in room["players"]:
-                        room["players"][voter_pid]["character"]["health"] = "Куряча сліпота (погано бачить вночі)"
-                cond_msg += "\n🙈 <i>Усі, хто голосував проти, отримали курячу сліпоту!</i>"
+                        room["players"][voter_pid]["character"]["health"] = (
+                            "Куряча сліпота (погано бачить вночі)"
+                        )
+                cond_msg += (
+                    "\n🙈 <i>Усі, хто голосував проти, отримали курячу сліпоту!</i>"
+                )
 
             elif cond["type"] == "SILENCE_VOTERS":
                 for voter_pid in kicked_player["voted_against"]:
                     if voter_pid in room["players"]:
                         room["players"][voter_pid]["character"]["is_silenced"] = True
-                cond_msg += "\n🤐 <i>Усі, хто голосував проти, мовчать у наступному раунді!</i>"
+                cond_msg += (
+                    "\n🤐 <i>Усі, хто голосував проти, мовчать у наступному раунді!</i>"
+                )
 
             elif cond["type"] == "CURE_RANDOM":
-                alive = [p for p in room["players"].values() if not p.get("is_spectator")]
+                alive = [
+                    p for p in room["players"].values() if not p.get("is_spectator")
+                ]
                 if alive:
                     lucky = random.choice(alive)
                     lucky["character"]["health"] = "Повністю здоровий(а)"
@@ -678,17 +856,28 @@ async def process_vote(callback: types.CallbackQuery):
             elif cond["type"] == "EXPOSE_TRAIT":
                 for voter_pid in kicked_player["voted_against"]:
                     if voter_pid in room["players"]:
-                        if "trait" not in room["players"][voter_pid]["character"]["opened"]:
-                            room["players"][voter_pid]["character"]["opened"].append("trait")
+                        if (
+                            "trait"
+                            not in room["players"][voter_pid]["character"]["opened"]
+                        ):
+                            room["players"][voter_pid]["character"]["opened"].append(
+                                "trait"
+                            )
                 cond_msg += "\n🧠 <i>Розкрито характер усіх, хто голосував проти!</i>"
 
             elif cond["type"] == "SWAP_ON_EXIT":
-                active_players = [p for p in room["players"].values() if not p.get("is_spectator")]
+                active_players = [
+                    p for p in room["players"].values() if not p.get("is_spectator")
+                ]
                 if active_players:
                     min_votes = min(p["votes"] for p in active_players)
-                    candidates_p = [p for p in active_players if p["votes"] == min_votes]
+                    candidates_p = [
+                        p for p in active_players if p["votes"] == min_votes
+                    ]
                     recipient = random.choice(candidates_p)
-                    recipient["character"]["baggage"] = kicked_player["character"]["baggage"]
+                    recipient["character"]["baggage"] = kicked_player["character"][
+                        "baggage"
+                    ]
                     kicked_player["character"]["baggage"] = "Передано при вигнанні"
                     cond_msg += f"\n🔄 <i>Багаж передано гравцю <b>{html.escape(recipient['name'])}</b>!</i>"
 
@@ -707,16 +896,20 @@ async def process_vote(callback: types.CallbackQuery):
 
         await update_live_dashboards(room_id)
 
-        current_alive = [v for v in room["players"].values() if not v.get("is_spectator", False)]
+        current_alive = [
+            v for v in room["players"].values() if not v.get("is_spectator", False)
+        ]
         if len(current_alive) <= room["bunker_seats"]:
-            success, final_msg = evaluate_survival(room["apocalypse"], current_alive, room["bunker_info"])
+            success, final_msg = evaluate_survival(
+                room["apocalypse"], current_alive, room["bunker_info"]
+            )
 
             final_tasks = [
                 bot.send_message(
                     p_id,
                     f"🏁 <b>ФІНАЛ ГРИ!</b>\n\n{final_msg}",
                     reply_markup=get_new_game_keyboard(),
-                    parse_mode="HTML"
+                    parse_mode="HTML",
                 )
                 for p_id in room["players"].keys()
             ]
@@ -726,12 +919,14 @@ async def process_vote(callback: types.CallbackQuery):
             room["round"] += 1
             room["status"] = "playing"
 
+
 async def main():
     if not API_TOKEN:
         logger.error("Токен бота не вказано! Вкажіть змінну оточення TG_API_TOKEN.")
         return
     logger.info("Бот успішно запущений та готовий до роботи!")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
