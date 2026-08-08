@@ -1028,11 +1028,10 @@ def generate_character() -> dict:
 def evaluate_survival(
     apocalypse_name: str, alive_players: List[dict], bunker_info: dict
 ) -> Tuple[bool, str]:
-    apoc = APOCALYPSES.get(apocalypse_name, {})
-    key_profs = apoc.get("key_professions", [])
+    key_profs = apoc.get("required", [])
     years = bunker_info.get("years", 5)
     durability = bunker_info.get("durability", 50)
-    min_dur = apoc.get("min_bunker_durability", 50)
+    min_dur = apoc.get("min_bunker_durability", 40)
 
     score = 0
     details = []
