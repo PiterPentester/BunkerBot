@@ -1021,6 +1021,8 @@ def generate_character() -> dict:
         "is_protected": False,
         "is_silenced": False,
         "double_vote": False,
+        "cancel_votes": False,
+        "reflect_vote": False,
         "opened": [],
     }
 
