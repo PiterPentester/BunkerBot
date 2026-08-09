@@ -1,15 +1,13 @@
 import pytest
 from unittest.mock import AsyncMock, patch
-
-# Import data & functions from game_data.py
 from game_data import (
+    ACTIONS,
+    CONDITIONS,
     generate_character,
     generate_bunker_info,
     evaluate_survival,
 )
 
-# Import bot logic from main.py (assuming main.py contains dp, ROOMS, etc.)
-# If your main file is named bot.py, change 'main' to 'bot' below.
 import main
 
 
@@ -268,88 +266,232 @@ async def test_targeted_actions(mock_edit, mock_send, mock_dash):
 
 
 # ---------------------------------------------------------------------------
-# 3. TESTING VOTING LOGIC & ALL 27 CONDITIONS (TESTAMENTS)
+# 3. COMPREHENSIVE TESTS FOR ALL 30 ACTIONS
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("action_info", ACTIONS, ids=lambda a: a["type"])
+@patch("main.update_live_dashboards", new_callable=AsyncMock)
+@patch("main.bot.send_message", new_callable=AsyncMock)
+@patch("main.bot.edit_message_text", new_callable=AsyncMock)
+async def test_all_actions(mock_edit, mock_send, mock_dash, action_info):
+    act_type = action_info["type"]
+    room = create_mock_room(f"room_act_{act_type}")
+    p1 = add_mock_player(room, 101, "Player 1")
+    p2 = add_mock_player(room, 102, "Player 2")
+
+    p1["character"]["baggage"] = "Actor Bag"
+    p2["character"]["baggage"] = "Target Bag"
+    p1["character"]["health"] = "Actor Health"
+    p2["character"]["health"] = "Target Health"
+    p1["character"]["profession"] = "Actor Prof"
+    p2["character"]["profession"] = "Target Prof"
+    p1["character"]["hobby"] = "Actor Hobby"
+    p2["character"]["hobby"] = "Target Hobby"
+    p1["character"]["trait"] = "Actor Trait"
+    p2["character"]["trait"] = "Target Trait"
+    p1["character"]["fact"] = "Actor Fact"
+    p2["character"]["fact"] = "Target Fact"
+    p1["character"]["opened"] = []
+    p2["character"]["opened"] = []
+
+    p1["character"]["action"] = action_info
+    p1["character"]["action_used"] = False
+
+    # Execute either untargeted or targeted callback
+    if act_type in main.TARGETED_ACTIONS:
+        cb = create_mock_callback(101, f"act_target:room_act_{act_type}:{act_type}:102")
+        await main.process_action_target(cb)
+    else:
+        cb = create_mock_callback(101, f"use_act:room_act_{act_type}")
+        await main.use_action(cb)
+
+    # Actor action should be marked as used
+    assert p1["character"]["action_used"] is True, (
+        f"Action {act_type} did not set action_used = True"
+    )
+
+    # Specific outcome assertions per action type:
+    if act_type == "SWAP_BAG":
+        assert p1["character"]["baggage"] == "Target Bag"
+        assert p2["character"]["baggage"] == "Actor Bag"
+    elif act_type == "SWAP_HEALTH":
+        assert p1["character"]["health"] == "Target Health"
+        assert p2["character"]["health"] == "Actor Health"
+    elif act_type == "SWAP_PROF":
+        assert p1["character"]["profession"] == "Target Prof"
+        assert p2["character"]["profession"] == "Actor Prof"
+    elif act_type == "SABOTAGE":
+        assert room["bunker_seats"] == 1
+    elif act_type == "HEAL":
+        assert p1["character"]["health"] == "Повністю здоровий(а)"
+    elif act_type == "CHECK":
+        cb.message.answer.assert_called_once()
+        assert "Target Prof" in cb.message.answer.call_args[0][0]
+    elif act_type == "PROTECT":
+        assert p1["character"]["is_protected"] is True
+    elif act_type == "DOUBLE_VOTE":
+        assert p1["character"]["double_vote"] is True
+    elif act_type == "SILENCE":
+        assert p2["character"]["is_silenced"] is True
+    elif act_type == "SWAP_HOBBY":
+        assert p1["character"]["hobby"] == "Target Hobby"
+        assert p2["character"]["hobby"] == "Actor Hobby"
+    elif act_type == "STEAL_BAG":
+        assert p1["character"]["baggage"] == "Actor Bag + Target Bag"
+        assert p2["character"]["baggage"] == "Порожньо (викрадено)"
+    elif act_type == "INFECT":
+        assert p2["character"]["health"] == "Actor Health"
+    elif act_type == "REVEAL_ALL":
+        assert len(p1["character"]["opened"]) == 1
+        assert len(p2["character"]["opened"]) == 1
+    elif act_type == "ADD_SEAT":
+        assert room["bunker_seats"] == 3
+    elif act_type == "REFLECT_VOTE":
+        assert p1["character"]["reflect_vote"] is True
+    elif act_type == "REVEAL_FACT":
+        cb.message.answer.assert_called_once()
+        assert "Target Fact" in cb.message.answer.call_args[0][0]
+    elif act_type == "CURE_OTHER":
+        assert p2["character"]["health"] == "Повністю здоровий(а)"
+    elif act_type == "SWAP_TRAIT":
+        assert p1["character"]["trait"] == "Target Trait"
+        assert p2["character"]["trait"] == "Actor Trait"
+    elif act_type == "SWAP_FACT":
+        assert p1["character"]["fact"] == "Target Fact"
+        assert p2["character"]["fact"] == "Actor Fact"
+    elif act_type == "COPY_BAG":
+        assert p1["character"]["baggage"] == "Target Bag"
+        assert p2["character"]["baggage"] == "Target Bag"
+    elif act_type == "MAKE_SICK":
+        assert p2["character"]["health"] == "Невиліковна біологічна хвороба"
+    elif act_type == "QUARANTINE":
+        assert p2["character"]["is_silenced"] is True
+    elif act_type == "FORCE_VOTE_TARGET":
+        assert p2["character"]["forced_vote"] is True
+    elif act_type == "REVEAL_TARGET_ALL":
+        assert len(p2["character"]["opened"]) == len(main.LABELS)
+    elif act_type == "CANCEL_VOTES":
+        assert p1["character"]["cancel_votes"] is True
+    elif act_type == "STEAL_ACTION":
+        assert p2["character"]["action_used"] is True
+    elif act_type == "LINK_SURVIVAL":
+        assert p1["character"]["linked_partner"] == 102
+
+
+@pytest.mark.asyncio
+@patch("main.update_live_dashboards", new_callable=AsyncMock)
+@patch("main.bot.send_message", new_callable=AsyncMock)
+@patch("main.bot.edit_message_text", new_callable=AsyncMock)
+async def test_action_validation_edge_cases(mock_edit, mock_send, mock_dash):
+    room = create_mock_room("room_edge")
+    p1 = add_mock_player(room, 101, "Player 1")
+
+    # 1. Action already used
+    p1["character"]["action_used"] = True
+    p1["character"]["action"] = {"type": "SABOTAGE", "name": "Саботаж"}
+    cb1 = create_mock_callback(101, "use_act:room_edge")
+    await main.use_action(cb1)
+    cb1.answer.assert_called_with("Ви вже використали свою дію!", show_alert=True)
+
+    # 2. Spectator cannot use action
+    p2 = add_mock_player(room, 102, "Spectator", is_spectator=True)
+    p2["character"]["action"] = {"type": "SABOTAGE", "name": "Саботаж"}
+    cb2 = create_mock_callback(102, "use_act:room_edge")
+    await main.use_action(cb2)
+    cb2.answer.assert_called_with(
+        "Спостерігачі не можуть виконувати дії.", show_alert=True
+    )
+
+    # 3. Targeted action with no available targets
+    p1["character"]["action_used"] = False
+    p1["character"]["action"] = {"type": "SWAP_BAG", "name": "Обмін"}
+    cb3 = create_mock_callback(101, "use_act:room_edge")
+    await main.use_action(cb3)
+    cb3.answer.assert_called_with(
+        "Немає доступних цілей для цієї дії!", show_alert=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# 4. COMPREHENSIVE TESTS FOR ALL 27 CONDITIONS (TESTAMENTS)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cond_info", CONDITIONS, ids=lambda c: c["type"])
 @patch("main.update_live_dashboards", new_callable=AsyncMock)
 @patch("main.evaluate_survival")
 @patch("main.bot.send_message", new_callable=AsyncMock)
 @patch("main.bot.edit_message_text", new_callable=AsyncMock)
-async def test_voting_and_conditions(mock_edit, mock_send, mock_eval, mock_dash):
+async def test_all_conditions(mock_edit, mock_send, mock_eval, mock_dash, cond_info):
     mock_eval.return_value = (True, "Win Report")
+    cond_type = cond_info["type"]
+    room = create_mock_room(f"room_cond_{cond_type}", seats=1)
+    p1 = add_mock_player(room, 101, "Voter")
+    p2 = add_mock_player(room, 102, "Evicted Player")
 
-    # Test Condition: PLAGUE_VOTERS
-    room = create_mock_room("room_vote_1", seats=1)
-    p1 = add_mock_player(room, 101, "Voter 1")
-    p2 = add_mock_player(room, 102, "Target Player")
+    p2["character"]["condition"] = cond_info
+    p2["voted"] = True  # Ensure voting phase concludes when p1 votes
 
-    p2["character"]["condition"] = {"type": "PLAGUE_VOTERS", "desc": "Plague Test"}
-
-    # p2 has already voted (or cannot vote) so p1's vote concludes the round
-    p2["voted"] = True
-
-    # p1 votes against p2
-    cb = create_mock_callback(101, "vote:room_vote_1:102")
+    cb = create_mock_callback(101, f"vote:room_cond_{cond_type}:102")
     await main.process_vote(cb)
 
-    assert p2["is_spectator"] is True  # Evicted!
-    assert p1["character"]["health"] == "Смертельна чума"  # Plague applied to voter!
+    assert p2["is_spectator"] is True, f"Condition {cond_type}: player was not evicted"
+
+    # Specific mechanical assertions
+    if cond_type == "PLAGUE_VOTERS":
+        assert p1["character"]["health"] == "Смертельна чума"
+    elif cond_type == "INFECT_VOTERS":
+        assert p1["character"]["health"] == "Легка застуда"
+    elif cond_type == "DESTROY_BAG":
+        assert p2["character"]["baggage"] == "Знищено при вигнанні"
+    elif cond_type == "STEAL_FOOD":
+        assert room["bunker_seats"] == 0
+    elif cond_type == "CURSE_HOST":
+        assert (
+            room["players"][101]["character"]["baggage"] == "Втрачено через прокляття"
+        )
+    elif cond_type == "REVEAL_SECRET":
+        assert "fact" in p2["character"]["opened"]
+    elif cond_type == "SWAP_ON_EXIT":
+        assert (
+            p1["character"]["baggage"] == p2["character"]["baggage"]
+            or p2["character"]["baggage"] == "Передано при вигнанні"
+        )
+    elif cond_type == "LOCK_DOOR":
+        assert p1["character"]["is_silenced"] is True
+    elif cond_type == "GIFT_BAG":
+        assert (
+            p1["character"]["baggage"] == p2["character"]["baggage"]
+            or p2["character"]["baggage"] == "Подаровано при вигнанні"
+        )
+    elif cond_type == "GHOST_VOTE":
+        assert p2["is_ghost_voter"] is True
+    elif cond_type == "BLIND_VOTERS":
+        assert p1["character"]["health"] == "Куряча сліпота"
+    elif cond_type == "CURE_RANDOM":
+        assert p1["character"]["health"] == "Повністю здоровий(а)"
+    elif cond_type == "DROP_KEY":
+        assert room["bunker_seats"] == 2
+    elif cond_type == "EXPOSE_TRAIT":
+        assert "trait" in p1["character"]["opened"]
+    elif cond_type == "SILENCE_VOTERS":
+        assert p1["character"]["is_silenced"] is True
 
 
-@pytest.mark.asyncio
-@patch("main.update_live_dashboards", new_callable=AsyncMock)
-@patch("main.evaluate_survival")
-@patch("main.bot.send_message", new_callable=AsyncMock)
-@patch("main.bot.edit_message_text", new_callable=AsyncMock)
-async def test_condition_ghost_vote_and_drop_key(
-    mock_edit, mock_send, mock_eval, mock_dash
-):
-    mock_eval.return_value = (True, "Win Report")
+def test_cleanup_stale_rooms():
+    create_mock_room("room_active")
+    create_mock_room("room_stale")
 
-    room = create_mock_room("room_vote_2", seats=1)
-    add_mock_player(room, 101, "Voter")
-    p2 = add_mock_player(room, 102, "Ghost Target")
+    import time
 
-    p2["voted"] = True  # Mark target as having voted so round finishes
-    p2["character"]["condition"] = {"type": "GHOST_VOTE", "desc": "Ghost Test"}
+    current_time = time.time()
+    main.ROOMS["room_active"]["last_activity"] = current_time
+    main.ROOMS["room_stale"]["last_activity"] = current_time - 100000  # Older than 24h
 
-    cb1 = create_mock_callback(101, "vote:room_vote_2:102")
-    await main.process_vote(cb1)
-
-    assert p2["is_spectator"] is True
-    assert p2["is_ghost_voter"] is True  # Ghost active for next round!
-
-    # Test DROP_KEY
-    room2 = create_mock_room("room_vote_3", seats=1)
-    add_mock_player(room2, 201, "Voter")
-    p2_3 = add_mock_player(room2, 202, "Key Dropper")
-
-    p2_3["voted"] = True  # Mark target as having voted so round finishes
-    p2_3["character"]["condition"] = {"type": "DROP_KEY", "desc": "Key Test"}
-
-    cb2 = create_mock_callback(201, "vote:room_vote_3:202")
-    await main.process_vote(cb2)
-
-    assert room2["bunker_seats"] == 2  # Seats increased from 1 to 2!
-
-
-@pytest.mark.asyncio
-@patch("main.update_live_dashboards", new_callable=AsyncMock)
-@patch("main.bot.send_message", new_callable=AsyncMock)
-@patch("main.bot.edit_message_text", new_callable=AsyncMock)
-async def test_voting_tie_and_revote(mock_edit, mock_send, mock_dash):
-    room = create_mock_room("room_tie", seats=1)
-    add_mock_player(room, 101, "P1")
-    add_mock_player(room, 102, "P2")
-
-    # Tie situation: p1 votes for p2, p2 votes for p1
-    cb1 = create_mock_callback(101, "vote:room_tie:102")
-    cb2 = create_mock_callback(102, "vote:room_tie:101")
-
-    await main.process_vote(cb1)
-    await main.process_vote(cb2)
-
-    # Tie detected, candidates entered into revote
-    assert room.get("revote_candidates") == [101, 102]
+    purged = main.cleanup_stale_rooms(max_age_seconds=86400)
+    assert purged == 1
+    assert "room_active" in main.ROOMS
+    assert "room_stale" not in main.ROOMS

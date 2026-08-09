@@ -133,3 +133,18 @@ def test_survival_bunker_durability_penalty():
 
     success, report = evaluate_survival("Біологічна чума", alive_players, bunker_info)
     assert "занадто слабким" in report
+
+
+def test_all_apocalypses_structure():
+    """Перевірка валідності структури всіх сценаріїв апокаліпсису."""
+    from game_data import APOCALYPSES
+
+    assert len(APOCALYPSES) >= 30
+    for name, data in APOCALYPSES.items():
+        assert "desc" in data and isinstance(data["desc"], str)
+        assert "required" in data and isinstance(data["required"], list)
+        assert "required_lower" in data and isinstance(data["required_lower"], list)
+        assert "min_healthy" in data
+        assert "repopulation_needed" in data and isinstance(
+            data["repopulation_needed"], bool
+        )
