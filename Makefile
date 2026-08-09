@@ -5,6 +5,16 @@ UV_CMD := $(shell command -v uv >/dev/null 2>&1 && echo "uv run " || echo "")
 
 check: format lint test
 
+deps:
+	if command -v uv >/dev/null 2>&1; then \
+		echo "uv is already installed"; \
+	else \
+		echo "Installing uv..."; \
+		curl -LsSf https://astral.sh/uv/install.sh | bash; \
+	fi
+	$(UV_CMD) sync
+
+
 format:
 	$(UV_CMD) ruff format .
 	$(UV_CMD) ruff check --fix .

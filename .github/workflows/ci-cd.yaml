@@ -34,6 +34,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Python Dependencies
+        run: make deps
+
+      - name: Run unit tests
+        run: make test
+
       # Helper to lowercase the repo owner name for Docker
       - name: Get lower case owner name
         id: owner
