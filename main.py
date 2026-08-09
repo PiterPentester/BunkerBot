@@ -1,3 +1,4 @@
+import time
 import asyncio
 import html
 import logging
@@ -72,6 +73,7 @@ TARGETED_ACTIONS = {
     "REVEAL_TARGET_ALL",
     "STEAL_ACTION",
     "LINK_SURVIVAL",
+    "FORCE_VOTE_TARGET",
 }
 
 
@@ -331,6 +333,8 @@ async def process_bunker_seats(message: types.Message, state: FSMContext):
         },
         "status": "waiting",
         "round": 1,
+        "last_activity": time.time(),
+        "evaluating_round": False,
     }
 
     bot_info = await bot.get_me()
@@ -701,6 +705,10 @@ async def process_action_target(callback: types.CallbackQuery):
         actor_char["linked_partner"] = target_id
         msg = f"🤝 <b>{actor_name}</b> уклав союз виживання з <b>{target_name}</b>!"
 
+    elif act_type == "FORCE_VOTE_TARGET":
+        target_char["forced_vote"] = True
+        msg = f"📣 <b>{actor_name}</b> змусив <b>{target_name}</b> проголосувати проти вашої цілі!"
+
     actor_char["action_used"] = True
 
     # Прибираємо повідомлення вибору цілі
@@ -970,8 +978,34 @@ async def process_vote(callback: types.CallbackQuery):
                 kicked_player["character"]["baggage"] = "Знищено при вигнанні"
 
             elif cond["type"] == "STEAL_FOOD":
-                room["bunker_seats"] = max(1, room["bunker_seats"] - 1)
+                room["bunker_seats"] = max(0, room["bunker_seats"] - 1)
                 cond_msg += "\n🚪 <i>Кількість місць у бункері зменшено на 1!</i>"
+
+            elif cond["type"] == "CURSE_HOST":
+                host_id = room.get("host_id")
+                if host_id and host_id in room["players"]:
+                    room["players"][host_id]["character"]["baggage"] = (
+                        "Втрачено через прокляття"
+                    )
+                cond_msg += "\n🔮 <i>Найбагатший гравець (гост) втратив свій багаж!</i>"
+
+            elif cond["type"] == "LOCK_DOOR":
+                for p_data in room["players"].values():
+                    if not p_data.get("is_spectator"):
+                        p_data["character"]["next_round_silenced"] = True
+                cond_msg += "\n🔒 <i>Двері бункера заблоковано!</i>"
+
+            elif cond["type"] == "GIFT_BAG":
+                if voters:
+                    first_voter_id = voters[0]
+                    if first_voter_id in room["players"]:
+                        room["players"][first_voter_id]["character"]["baggage"] = (
+                            kicked_player["character"]["baggage"]
+                        )
+                        kicked_player["character"]["baggage"] = (
+                            "Подаровано при вигнанні"
+                        )
+                cond_msg += "\n🎁 <i>Багаж подаровано першому виборцю!</i>"
 
             elif cond["type"] == "GHOST_VOTE":
                 kicked_player["is_ghost_voter"] = True
@@ -996,7 +1030,9 @@ async def process_vote(callback: types.CallbackQuery):
             elif cond["type"] == "SILENCE_VOTERS":
                 for voter_pid in voters:
                     if voter_pid in room["players"]:
-                        room["players"][voter_pid]["character"]["is_silenced"] = True
+                        room["players"][voter_pid]["character"][
+                            "next_round_silenced"
+                        ] = True
                 cond_msg += (
                     "\n🤐 <i>Усі, хто голосував проти, мовчать у наступному раунді!</i>"
                 )
@@ -1066,7 +1102,9 @@ async def process_vote(callback: types.CallbackQuery):
             pdata["character"]["double_vote"] = False
             pdata["character"]["cancel_votes"] = False
             pdata["character"]["reflect_vote"] = False
-            pdata["character"]["is_silenced"] = False
+            pdata["character"]["is_silenced"] = pdata["character"].pop(
+                "next_round_silenced", False
+            )
 
         await update_live_dashboards(room_id)
 
@@ -1093,6 +1131,21 @@ async def process_vote(callback: types.CallbackQuery):
         else:
             room["round"] += 1
             room["status"] = "playing"
+
+
+def cleanup_stale_rooms(max_age_seconds: int = 86400) -> int:
+    """Очищає кімнати з ROOMS, які були неактивні понад max_age_seconds (за замовчуванням 24 години)."""
+    current_time = time.time()
+    stale_room_ids = [
+        r_id
+        for r_id, r_data in ROOMS.items()
+        if current_time - r_data.get("last_activity", current_time) > max_age_seconds
+    ]
+    for r_id in stale_room_ids:
+        ROOMS.pop(r_id, None)
+    if stale_room_ids:
+        logger.info(f"Очищено {len(stale_room_ids)} неактивних кімнат.")
+    return len(stale_room_ids)
 
 
 async def main():
