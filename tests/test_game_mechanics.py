@@ -495,3 +495,135 @@ def test_cleanup_stale_rooms():
     assert purged == 1
     assert "room_active" in main.ROOMS
     assert "room_stale" not in main.ROOMS
+
+
+# ---------------------------------------------------------------------------
+# 5. REMATCH & REMATCH LOBBY MANAGEMENT TESTS
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@patch("main.render_rematch_lobby", new_callable=AsyncMock)
+async def test_init_rematch_success(mock_render):
+    """Перевірка створення рематч-кімнати з попереднім складом гравців."""
+    old_room_id = "old_room"
+    old_room = create_mock_room(old_room_id, seats=2, max_players=2)
+    add_mock_player(old_room, 101, "Host Player")
+    add_mock_player(old_room, 102, "Guest Player")
+
+    cb = create_mock_callback(101, f"init_rematch:{old_room_id}")
+    await main.init_rematch(cb)
+
+    # Стара кімната видаляється з пам'яті
+    assert old_room_id not in main.ROOMS
+    # У пам'яті створюється нова кімната з тими ж гравцями
+    assert len(main.ROOMS) == 1
+
+    new_room_id = list(main.ROOMS.keys())[0]
+    new_room = main.ROOMS[new_room_id]
+
+    assert new_room["host_id"] == 101
+    assert len(new_room["players"]) == 2
+    assert 101 in new_room["players"]
+    assert 102 in new_room["players"]
+    assert new_room["status"] == "waiting"
+    mock_render.assert_called_once_with(new_room_id)
+
+
+@pytest.mark.asyncio
+async def test_init_rematch_only_host():
+    """Перевірка заборони виклику рематчу не-хостом."""
+    old_room_id = "old_room"
+    old_room = create_mock_room(old_room_id)
+    add_mock_player(old_room, 101, "Host Player")
+    add_mock_player(old_room, 102, "Guest Player")
+
+    # Спроба рематчу від імені зазвичайного гравця (не хоста)
+    cb = create_mock_callback(102, f"init_rematch:{old_room_id}")
+    await main.init_rematch(cb)
+
+    cb.answer.assert_called_once_with(
+        "Лише хост попередньої гри може розпочати рематч!", show_alert=True
+    )
+    # Кімната залишається без змін
+    assert old_room_id in main.ROOMS
+
+
+@pytest.mark.asyncio
+@patch("main.render_rematch_lobby", new_callable=AsyncMock)
+@patch("main.bot.send_message", new_callable=AsyncMock)
+async def test_kick_player_and_auto_adjust_seats(mock_send, mock_render):
+    """Перевірка вилучення гравця хостом та автоматичного коригування місць у бункері."""
+    room_id = "rematch_room"
+    room = create_mock_room(room_id, seats=2, max_players=3)
+    add_mock_player(room, 101, "Host")
+    add_mock_player(room, 102, "Player To Kick")
+    add_mock_player(room, 103, "Other Player")
+
+    # Хост кикає 102
+    cb = create_mock_callback(101, f"kick_p:{room_id}:102")
+    await main.kick_player(cb)
+
+    assert 102 not in room["players"]
+    assert len(room["players"]) == 2
+    assert room["max_players"] == 2
+    # Оскільки залишилось 2 гравців, а місць було 2, seats мало коригуватись на len-1 (тобто 1)
+    assert room["bunker_seats"] == 1
+    mock_send.assert_called_once_with(
+        102, "❌ Вас було вилучено з наступної гри хостом."
+    )
+    mock_render.assert_called_once_with(room_id)
+
+
+@pytest.mark.asyncio
+@patch("main.render_rematch_lobby", new_callable=AsyncMock)
+async def test_process_rematch_seats_valid_and_invalid(mock_render):
+    """Перевірка зміни кількості місць у бункері під час рематчу."""
+    room_id = "rematch_seats_room"
+    room = create_mock_room(room_id, seats=1, max_players=3)
+    add_mock_player(room, 101, "Host")
+    add_mock_player(room, 102, "Player 2")
+    add_mock_player(room, 103, "Player 3")
+
+    state = AsyncMock()
+    state.get_data.return_value = {"rematch_room_id": room_id}
+
+    # 1. Невалідний ввід (забагато місць, має бути < кількість гравців)
+    msg_invalid = AsyncMock()
+    msg_invalid.text = "3"
+    msg_invalid.answer = AsyncMock()
+
+    await main.process_rematch_seats(msg_invalid, state)
+    msg_invalid.answer.assert_called_once_with("❌ Число має бути від 1 до 2.")
+    assert room["bunker_seats"] == 1
+
+    # 2. Валідний ввід
+    msg_valid = AsyncMock()
+    msg_valid.text = "2"
+    msg_valid.answer = AsyncMock()
+
+    await main.process_rematch_seats(msg_valid, state)
+    assert room["bunker_seats"] == 2
+    state.clear.assert_called_once()
+    mock_render.assert_called_once_with(room_id)
+
+
+@pytest.mark.asyncio
+@patch("main.update_live_dashboards", new_callable=AsyncMock)
+@patch("main.bot.send_message", new_callable=AsyncMock)
+async def test_restart_game(mock_send, mock_dash):
+    """Перевірка повторного запуску гри після підготовки в лобі."""
+    room_id = "restart_room"
+    room = create_mock_room(room_id, seats=1, max_players=2)
+    room["status"] = "waiting"
+    add_mock_player(room, 101, "Host")
+    add_mock_player(room, 102, "Player 2")
+
+    mock_send.return_value = AsyncMock(message_id=999)
+
+    cb = create_mock_callback(101, f"restart_game:{room_id}")
+    await main.restart_game(cb)
+
+    assert room["status"] == "playing"
+    assert mock_send.call_count == 2
+    mock_dash.assert_called_once_with(room_id)
