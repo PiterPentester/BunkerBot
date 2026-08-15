@@ -1154,7 +1154,10 @@ def evaluate_survival(
     for p in alive_players:
         name = html.escape(p.get("name", "Невідомий"))
         prof = p["character"]["profession"]
-        if prof in key_profs:
+        prof_lower = prof.lower()
+
+        # Перевірка: чи міститься будь-яка з вимог апокаліпсису в назві професії гравця
+        if any(req.lower() in prof_lower for req in key_profs):
             key_specialists.append(f"<b>{name}</b> ({prof})")
 
     if key_specialists:
