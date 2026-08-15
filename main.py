@@ -48,6 +48,7 @@ ROOMS: Dict[str, dict] = {}
 class CreateRoomState(StatesGroup):
     waiting_for_total_players = State()
     waiting_for_bunker_seats = State()
+    waiting_for_rematch_seats = State()
 
 
 bot = Bot(token=API_TOKEN if API_TOKEN else "123456:DummyToken")
@@ -83,10 +84,226 @@ def get_start_keyboard():
     return builder.as_markup()
 
 
-def get_new_game_keyboard():
+def get_rematch_lobby_keyboard(room_id: str, host_id: int):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔄 Розпочати нову гру", callback_data="init_room")
+    room = ROOMS.get(room_id)
+    if not room:
+        return builder.as_markup()
+
+    # Кнопки видалення гравців (доступні лише хосту)
+    for p_id, p_data in room["players"].items():
+        if p_id != host_id:  # Хост не може видалити сам себе
+            builder.button(
+                text=f"❌ Видалити: {p_data['name']}",
+                callback_data=f"kick_p:{room_id}:{p_id}",
+            )
+
+    builder.button(
+        text="⚙️ Змінити місця в бункері", callback_data=f"change_seats:{room_id}"
+    )
+    builder.button(
+        text="🚀 Розпочати нову гру", callback_data=f"restart_game:{room_id}"
+    )
+    builder.adjust(1)
     return builder.as_markup()
+
+
+def get_new_game_keyboard(room_id: str):
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔄 Нова гра з цим складом", callback_data=f"init_rematch:{room_id}"
+    )
+    builder.button(text="🎲 Створити нову кімнату", callback_data="init_room")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.callback_query(F.data.startswith("init_rematch:"))
+async def init_rematch(callback: types.CallbackQuery):
+    old_room_id = callback.data.split(":")[1]
+    old_room = ROOMS.get(old_room_id)
+
+    if not old_room:
+        await callback.answer("Дані попередньої гри вже застаріли.", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    if user_id != old_room["host_id"]:
+        await callback.answer(
+            "Лише хост попередньої гри може розпочати рематч!", show_alert=True
+        )
+        return
+
+    # Створюємо нову кімнату, зберігаючи список гравців
+    new_room_id = secrets.token_hex(4)
+    apocalypse_name = secrets.choice(list(APOCALYPSES.keys()))
+    bunker_info = generate_bunker_info()
+
+    new_players = {}
+    for p_id, p_data in old_room["players"].items():
+        new_players[p_id] = {
+            "name": p_data["name"],
+            "character": generate_character(),  # Генерація нових ролей
+            "votes": 0,
+            "voted_against": [],
+            "voted": False,
+            "dash_message_id": None,
+            "card_message_id": None,
+            "is_spectator": False,
+            "is_ghost_voter": False,
+        }
+
+    ROOMS[new_room_id] = {
+        "host_id": user_id,
+        "max_players": len(new_players),
+        "bunker_seats": min(
+            old_room["bunker_seats"],
+            len(new_players) - 1 if len(new_players) > 1 else 1,
+        ),
+        "apocalypse": apocalypse_name,
+        "bunker_info": bunker_info,
+        "players": new_players,
+        "status": "waiting",
+        "round": 1,
+        "last_activity": time.time(),
+        "evaluating_round": False,
+    }
+
+    # Очищуємо стару кімнату
+    ROOMS.pop(old_room_id, None)
+
+    await render_rematch_lobby(new_room_id)
+
+
+async def render_rematch_lobby(room_id: str):
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+
+    p_list = "\n".join(
+        [f"• <b>{html.escape(p['name'])}</b>" for p in room["players"].values()]
+    )
+    text = (
+        f"🔄 <b>ПІДГОТОВКА ДО НОВОЇ ГРИ</b>\n\n"
+        f"🌋 Катастрофа: <b>{html.escape(room['apocalypse'])}</b>\n"
+        f"👥 Гравців: <b>{len(room['players'])}</b>\n"
+        f"🔒 Місць у бункері: <b>{room['bunker_seats']}</b>\n\n"
+        f"<b>Склад гравців:</b>\n{p_list}\n\n"
+        f"<i>Хост може видалити зайвих гравців або змінити кількість місць у бункері перед стартом.</i>"
+    )
+
+    tasks = [
+        bot.send_message(
+            p_id,
+            text,
+            reply_markup=get_rematch_lobby_keyboard(room_id, room["host_id"])
+            if p_id == room["host_id"]
+            else None,
+            parse_mode="HTML",
+        )
+        for p_id in room["players"].keys()
+    ]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@dp.callback_query(F.data.startswith("kick_p:"))
+async def kick_player(callback: types.CallbackQuery):
+    _, room_id, target_id_str = callback.data.split(":")
+    target_id = int(target_id_str)
+    room = ROOMS.get(room_id)
+
+    if not room or callback.from_user.id != room["host_id"]:
+        await callback.answer("Дія недоступна.", show_alert=True)
+        return
+
+    if target_id in room["players"]:
+        kicked_name = room["players"][target_id]["name"]
+        del room["players"][target_id]
+        room["max_players"] = len(room["players"])
+
+        # Коригуємо кількість місць, якщо гравців стало менше за кількість місць
+        if room["bunker_seats"] >= len(room["players"]):
+            room["bunker_seats"] = max(1, len(room["players"]) - 1)
+
+        await callback.answer(f"Гравця {kicked_name} вилучено з гри.")
+
+        # Повідомляємо кикнутого гравця
+        try:
+            await bot.send_message(
+                target_id, "❌ Вас було вилучено з наступної гри хостом."
+            )
+        except Exception:
+            pass
+
+        await render_rematch_lobby(room_id)
+
+
+@dp.callback_query(F.data.startswith("change_seats:"))
+async def change_seats_prompt(callback: types.CallbackQuery, state: FSMContext):
+    room_id = callback.data.split(":")[1]
+    room = ROOMS.get(room_id)
+
+    if not room or callback.from_user.id != room["host_id"]:
+        await callback.answer("Дія недоступна.", show_alert=True)
+        return
+
+    await state.update_data(rematch_room_id=room_id)
+    await state.set_state(CreateRoomState.waiting_for_rematch_seats)
+    await callback.message.answer(
+        f"🔒 Введіть нову кількість місць у бункері (від 1 до {len(room['players']) - 1}):"
+    )
+
+
+@dp.message(CreateRoomState.waiting_for_rematch_seats)
+async def process_rematch_seats(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    room_id = data.get("rematch_room_id")
+    room = ROOMS.get(room_id)
+
+    if not room:
+        await state.clear()
+        await message.answer("❌ Кімнату не знайдено.")
+        return
+
+    max_allowed = len(room["players"]) - 1
+    if not message.text.isdigit() or not (1 <= int(message.text) <= max_allowed):
+        await message.answer(f"❌ Число має бути від 1 до {max_allowed}.")
+        return
+
+    room["bunker_seats"] = int(message.text)
+    await state.clear()
+    await message.answer("✅ Кількість місць оновлено.")
+    await render_rematch_lobby(room_id)
+
+
+@dp.callback_query(F.data.startswith("restart_game:"))
+async def restart_game(callback: types.CallbackQuery):
+    room_id = callback.data.split(":")[1]
+    room = ROOMS.get(room_id)
+
+    if not room or callback.from_user.id != room["host_id"]:
+        await callback.answer("Лише хост може зародити гру!", show_alert=True)
+        return
+
+    if len(room["players"]) < 2:
+        await callback.answer(
+            "Для старту гри потрібно мінімум 2 гравці!", show_alert=True
+        )
+        return
+
+    room["status"] = "playing"
+
+    for player_id, p_data in room["players"].items():
+        char = p_data["character"]
+        pinned_msg = await bot.send_message(
+            player_id,
+            format_personal_card(char),
+            reply_markup=get_reveal_keyboard(room_id, char),
+            parse_mode="HTML",
+        )
+        p_data["card_message_id"] = pinned_msg.message_id
+
+    await update_live_dashboards(room_id)
 
 
 def get_reveal_keyboard(room_id: str, character: dict, is_alive: bool = True):
@@ -1125,7 +1342,7 @@ async def process_vote(callback: types.CallbackQuery):
                 bot.send_message(
                     p_id,
                     f"🏁 <b>ФІНАЛ ГРИ!</b>\n\n{final_msg}",
-                    reply_markup=get_new_game_keyboard(),
+                    reply_markup=get_new_game_keyboard(room_id),  # Передаємо room_id
                     parse_mode="HTML",
                 )
                 for p_id in room["players"].keys()
