@@ -938,14 +938,18 @@ async def process_vote(callback: types.CallbackQuery):
             room.pop("revote_candidates", None)
 
             # Перевірка союзу виживання (LINK_SURVIVAL)
-            for p_data in room["players"].values():
-                if p_data["character"].get("linked_partner") == kicked_id:
-                    p_data["character"]["is_protected"] = True
-                    await bot.send_message(
-                        p_data["character"].get("user_id", kicked_id),
-                        "🤝 <b>Ваш партнер вибув! Ви отримуєте щит захисту на наступний раунд.</b>",
-                        parse_mode="HTML",
-                    )
+            # Якщо вигнаний гравець був обраний як партнер, захист отримує той, хто застосував дію
+            # Перевірка союзу виживання (LINK_SURVIVAL)
+            for p_id, p_data in room["players"].items():
+                if not p_data.get("is_spectator"):
+                    # Якщо цей гравець (Гравець 1) прив'язався до вигнаного гравця (kicked_id)
+                    if p_data["character"].get("linked_partner") == kicked_id:
+                        p_data["character"]["is_protected"] = True
+                        await bot.send_message(
+                            p_id,
+                            "🤝 <b>Ваш партнер вибув! Ви отримуєте щит захисту на наступний раунд.</b>",
+                            parse_mode="HTML",
+                        )
 
             cond = kicked_player["character"]["condition"]
             kicked_name = html.escape(kicked_player["name"])
