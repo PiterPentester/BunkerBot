@@ -1348,7 +1348,10 @@ async def process_vote(callback: types.CallbackQuery):
                 for p_id in room["players"].keys()
             ]
             await asyncio.gather(*final_tasks, return_exceptions=True)
-            del ROOMS[room_id]
+            # Keep room data so "Нова гра з цим складом" (init_rematch) can still access players.
+            # Room will be removed when rematch starts or by stale cleanup later.
+            room["status"] = "finished"
+            room["last_activity"] = time.time()
         else:
             room["round"] += 1
             room["status"] = "playing"
@@ -1369,12 +1372,38 @@ def cleanup_stale_rooms(max_age_seconds: int = 86400) -> int:
     return len(stale_room_ids)
 
 
+async def _stale_rooms_cleanup_loop(
+    interval_seconds: int = 3600, max_age_seconds: int = 86400
+) -> None:
+    """Фоновий цикл періодичного очищення застарілих кімнат."""
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            cleaned = cleanup_stale_rooms(max_age_seconds=max_age_seconds)
+            if cleaned:
+                logger.info(f"Таймер очищення: видалено {cleaned} кімнат(и).")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception(f"Помилка в циклі очищення кімнат: {e}")
+
+
 async def main():
     if not API_TOKEN:
         logger.error("Токен бота не вказано! Вкажіть змінну оточення TG_API_TOKEN.")
         return
     logger.info("Бот успішно запущений та готовий до роботи!")
-    await dp.start_polling(bot)
+    cleanup_task = asyncio.create_task(
+        _stale_rooms_cleanup_loop(interval_seconds=3600, max_age_seconds=86400)
+    )
+    try:
+        await dp.start_polling(bot)
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
 
 if __name__ == "__main__":
