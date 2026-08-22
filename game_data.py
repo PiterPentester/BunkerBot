@@ -1193,6 +1193,8 @@ def evaluate_survival(
     # Category collectors
     repair_specialists = []
     repair_tools = []
+    fertile_males = []
+    fertile_females = []
     adult_males = []
     adult_females = []
     treatable_sick_players = []
@@ -1256,12 +1258,24 @@ def evaluate_survival(
         )
         if is_fertile:
             max_age = 60 if gender == "Чоловік" else 50
-            match gender:
-                case "Чоловік" if 16 <= age_at_exit and age <= max_age:
-                    adult_males.append(f"{name} (зараз {age}, досяг {age_at_exit} р.)")
-                case "Жінка" if 16 <= age_at_exit and age <= max_age:
-                    adult_females.append(
-                        f"{name} (зараз {age}, досягла {age_at_exit} р.)"
+            t_start = max(0, 16 - age)
+            t_end = min(years, max_age - age)
+            if t_start <= t_end:
+                if gender == "Чоловік":
+                    fertile_males.append(
+                        (
+                            f"{name} (зараз {age}, досяг {age_at_exit} р.)",
+                            t_start,
+                            t_end,
+                        )
+                    )
+                elif gender == "Жінка":
+                    fertile_females.append(
+                        (
+                            f"{name} (зараз {age}, досягла {age_at_exit} р.)",
+                            t_start,
+                            t_end,
+                        )
                     )
 
         # 3. Key Apocalypse Specialists
@@ -1329,6 +1343,20 @@ def evaluate_survival(
         )
 
     # 2. Evaluate Demographics
+    for m_text, m_start, m_end in fertile_males:
+        if any(
+            max(m_start, f_start) <= min(m_end, f_end)
+            for _, f_start, f_end in fertile_females
+        ):
+            adult_males.append(m_text)
+
+    for f_text, f_start, f_end in fertile_females:
+        if any(
+            max(m_start, f_start) <= min(m_end, f_end)
+            for _, m_start, m_end in fertile_males
+        ):
+            adult_females.append(f_text)
+
     if adult_males and adult_females:
         score += 35
         males_str = ", ".join(adult_males)

@@ -99,6 +99,78 @@ def test_survival_failure_due_to_infertility():
     assert "Популяція приречена на вимирання" in report
 
 
+def test_survival_failure_due_to_non_overlapping_fertility_windows():
+    """Перевірка: чоловік і жінка мають бути фертильними одночасно.
+    Хлопчик 10 років (фертильний з 6-го року) та жінка 48 років (фертильна до 2-го року)
+    не фертильні одночасно протягом 10 років у бункері."""
+    bunker_info = {"years": 10, "durability": 80, "condition": "ОК", "resources": "ОК"}
+
+    alive_players = [
+        {
+            "name": "Boy10",
+            "character": {
+                "gender": "Чоловік",
+                "age": 10,
+                "health": "Повністю здоровий(а)",
+                "fact": "Немає",
+                "profession": "Фізик-ядерник",
+            },
+        },
+        {
+            "name": "Woman48",
+            "character": {
+                "gender": "Жінка",
+                "age": 48,
+                "health": "Повністю здоровий(а)",
+                "fact": "Немає",
+                "profession": "Інженер-енергетик",
+            },
+        },
+    ]
+
+    success, report = evaluate_survival("Ядерна зима", alive_players, bunker_info)
+    assert "Популяція приречена на вимирання" in report
+
+
+def test_survival_success_with_overlapping_fertility_window():
+    """Перевірка: хлопчик 12 років і жінка 44 роки перетинаються у фертильності
+    на 4-6 роках ізоляції (йому 16-18, їй 48-50)."""
+    bunker_info = {
+        "years": 10,
+        "durability": 80,
+        "condition": "Ідеальний стан",
+        "resources": "Нормальний рівень",
+    }
+
+    alive_players = [
+        {
+            "name": "Boy12",
+            "character": {
+                "gender": "Чоловік",
+                "age": 12,
+                "health": "Повністю здоровий(а)",
+                "fact": "Немає",
+                "profession": "Фізик-ядерник",
+            },
+        },
+        {
+            "name": "Woman44",
+            "character": {
+                "gender": "Жінка",
+                "age": 44,
+                "health": "Повністю здоровий(а)",
+                "fact": "Немає",
+                "profession": "Інженер-енергетик",
+            },
+        },
+    ]
+
+    success, report = evaluate_survival("Ядерна зима", alive_players, bunker_info)
+    assert "Відновлення популяції можливе!" in report
+    assert "Boy12" in report
+    assert "Woman44" in report
+
+
 def test_survival_bunker_durability_penalty():
     """Перевірка впливу низької міцності бункера на виживання."""
     bunker_info = {
