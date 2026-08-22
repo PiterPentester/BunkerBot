@@ -446,6 +446,27 @@ async def test_reveal_all_only_unopened_characteristics(
     assert len(set(p2["character"]["opened"])) == len(all_keys)
 
 
+@pytest.mark.asyncio
+@patch("main.update_live_dashboards", new_callable=AsyncMock)
+@patch("main.bot.send_message", new_callable=AsyncMock)
+@patch("main.bot.edit_message_text", new_callable=AsyncMock)
+async def test_all_silenced_voters_auto_resolves_round(mock_edit, mock_send, mock_dash):
+    room = create_mock_room("room_silence_all", seats=1)
+    p1 = add_mock_player(room, 101, "Player 1")
+    p2 = add_mock_player(room, 102, "Player 2")
+
+    p1["character"]["is_silenced"] = True
+    p2["character"]["is_silenced"] = True
+
+    await main.start_voting_phase("room_silence_all")
+
+    # Both players were silenced, so 0 votes cast -> no eviction -> round advances to round 2
+    assert room["round"] == 2
+    assert room["status"] == "playing"
+    assert p1["character"]["is_silenced"] is False
+    assert p2["character"]["is_silenced"] is False
+
+
 # ---------------------------------------------------------------------------
 # 4. COMPREHENSIVE TESTS FOR ALL 27 CONDITIONS (TESTAMENTS)
 # ---------------------------------------------------------------------------
