@@ -1119,7 +1119,7 @@ def evaluate_survival(
 
         is_fertile = "безплід" not in health and "безплід" not in fact
         if is_fertile:
-            max_age = 60 if gender == "Чоловік" else 45
+            max_age = 60 if gender == "Чоловік" else 50
             match gender:
                 case "Чоловік" if 16 <= age_at_exit and char["age"] <= max_age:
                     adult_males.append(
