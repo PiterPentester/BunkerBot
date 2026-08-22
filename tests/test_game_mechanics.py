@@ -414,6 +414,38 @@ async def test_action_validation_edge_cases(mock_edit, mock_send, mock_dash):
     )
 
 
+@pytest.mark.asyncio
+@patch("main.update_live_dashboards", new_callable=AsyncMock)
+@patch("main.bot.send_message", new_callable=AsyncMock)
+@patch("main.bot.edit_message_text", new_callable=AsyncMock)
+async def test_reveal_all_only_unopened_characteristics(
+    mock_edit, mock_send, mock_dash
+):
+    room = create_mock_room("room_reveal_test")
+    p1 = add_mock_player(room, 101, "Player 1")
+    p2 = add_mock_player(room, 102, "Player 2")
+
+    # p1 already has 7 traits opened, only "fact" remains unopened
+    all_keys = list(main.LABELS.keys())
+    p1["character"]["opened"] = all_keys[:-1]
+    p1["character"]["action"] = {"type": "REVEAL_ALL", "name": "Викривач"}
+    p1["character"]["action_used"] = False
+
+    # p2 already has all traits opened
+    p2["character"]["opened"] = list(all_keys)
+
+    cb = create_mock_callback(101, "use_act:room_reveal_test")
+    await main.use_action(cb)
+
+    # p1 should now have the last unopened trait ("fact") opened
+    assert all_keys[-1] in p1["character"]["opened"]
+    assert len(p1["character"]["opened"]) == len(all_keys)
+
+    # p2 should still have all traits and no duplicates
+    assert len(p2["character"]["opened"]) == len(all_keys)
+    assert len(set(p2["character"]["opened"])) == len(all_keys)
+
+
 # ---------------------------------------------------------------------------
 # 4. COMPREHENSIVE TESTS FOR ALL 27 CONDITIONS (TESTAMENTS)
 # ---------------------------------------------------------------------------

@@ -696,11 +696,25 @@ async def use_action(callback: types.CallbackQuery):
         char["action_used"] = True
         for p_id, p_data in room["players"].items():
             if not p_data.get("is_spectator"):
+                p_char = p_data["character"]
                 unopened = [
-                    k for k in LABELS.keys() if k not in p_data["character"]["opened"]
+                    k for k in LABELS.keys() if k not in p_char.get("opened", [])
                 ]
                 if unopened:
-                    p_data["character"]["opened"].append(random.choice(unopened))
+                    chosen = random.choice(unopened)
+                    p_char["opened"].append(chosen)
+
+                if p_data.get("card_message_id") and p_id != user_id:
+                    try:
+                        await bot.edit_message_text(
+                            chat_id=p_id,
+                            message_id=p_data["card_message_id"],
+                            text=format_personal_card(p_char),
+                            reply_markup=get_reveal_keyboard(room_id, p_char),
+                            parse_mode="HTML",
+                        )
+                    except Exception:
+                        pass
         await callback.message.answer(
             "📢 <b>Викривач!</b> Відкрито по 1 прихованій характеристиці кожного гравця.",
             parse_mode="HTML",
