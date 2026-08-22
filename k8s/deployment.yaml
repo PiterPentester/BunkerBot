@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: ghcr.io/piterpentester/bunker-bot:377367fe
+          image: ghcr.io/piterpentester/bunker-bot:29081a2b
           imagePullPolicy: IfNotPresent
           env:
             - name: TG_API_TOKEN
