@@ -1089,50 +1089,246 @@ def evaluate_survival(
     key_profs = apoc.get("required", [])
     years = bunker_info.get("years", 5)
     durability = bunker_info.get("durability", 50)
+    condition = bunker_info.get("condition", "Задовільний стан")
+    resources = bunker_info.get("resources", "Нормальний рівень")
     min_dur = apoc.get("min_bunker_durability", 40)
 
     score = 0
     details = []
 
-    if durability >= min_dur:
+    # 1. Technical & Engineering Repairs (Durability & Condition)
+    repair_keywords = [
+        "інженер",
+        "механік",
+        "будівельник",
+        "слюсар",
+        "електрик",
+        "архітектор",
+        "тесля",
+        "коваль",
+        "спеціаліст з вентиляції",
+        "газовидобувник",
+        "шахтар",
+    ]
+    tool_keywords = [
+        "слюсарних інструментів",
+        "інструмент",
+        "скотч",
+        "ізолента",
+        "лом",
+        "топірець",
+        "батарейок",
+        "складаний ніж",
+        "брезентовий тент",
+    ]
+    repair_hobby_keywords = [
+        "зварка",
+        "ремонт",
+        "радіоелектроніка",
+        "конструювання",
+        "металургі",
+    ]
+    med_keywords = [
+        "лікар",
+        "хірург",
+        "фармацевт",
+        "медбрат",
+        "педіатр",
+        "кардіолог",
+        "дерматолог",
+        "невролог",
+        "травматолог",
+        "епідеміолог",
+        "ветеринар",
+    ]
+    med_supplies = ["аптечк", "хірургічн", "антисептик", "вугілл", "фільтр-трубочк"]
+    med_hobbies = ["лікарських трав", "травництв", "народна медицина"]
+    food_baggage = [
+        "консерв",
+        "чистої води",
+        "каністра",
+        "насінн",
+        "молок",
+        "горіх",
+        "спецій",
+        "рибальськ",
+        "сухе пальне",
+        "корм",
+        "фільтр-трубочк",
+    ]
+    food_professions = [
+        "агроном",
+        "кухар",
+        "бджоляр",
+        "птахівник",
+        "ботанік",
+        "гідролог",
+        "міколог",
+        "мисливець",
+    ]
+    food_hobbies = [
+        "садівництв",
+        "кулінарі",
+        "гриб",
+        "риб",
+        "полюванн",
+        "гідропонік",
+        "бджолярств",
+        "дистиляці",
+        "консерваці",
+    ]
+    energy_baggage = ["сонячн", "раці", "павербанк", "годинник", "генератор"]
+    energy_profs = ["електрик", "програміст", "звукорежисер", "радіоелектроніка"]
+    morale_items = [
+        "гітар",
+        "карт",
+        "настільні",
+        "музикант",
+        "психолог",
+        "миротворець",
+    ]
+
+    key_profs_lower = apoc.get("required_lower", [req.lower() for req in key_profs])
+
+    # Category collectors
+    repair_specialists = []
+    repair_tools = []
+    adult_males = []
+    adult_females = []
+    treatable_sick_players = []
+    terminally_ill_players = []
+    key_specialists = []
+    med_staff = []
+    med_items = []
+    food_providers = []
+    food_items = []
+    energy_tech = []
+    morale_boosters = []
+
+    # Single-pass extraction and classification
+    for p in alive_players:
+        name = html.escape(str(p.get("name")))
+        char = p.get("character") or {}
+        age = char.get("age")
+        gender = char.get("gender")
+        prof = str(char.get("profession"))
+        prof_lower = prof.lower()
+        bag = str(char.get("baggage"))
+        bag_lower = bag.lower()
+        hobby = str(char.get("hobby"))
+        hobby_lower = hobby.lower()
+        trait_lower = str(char.get("trait")).lower()
+        health_lower = str(char.get("health")).lower()
+        fact_lower = str(char.get("fact")).lower()
+
+        # 1. Technical & Engineering
+        if any(kw in prof_lower for kw in repair_keywords):
+            repair_specialists.append(f"<b>{name}</b> ({prof})")
+        if any(kw in bag_lower for kw in tool_keywords):
+            repair_tools.append(f"{bag} ({name})")
+        elif any(kw in hobby_lower for kw in repair_hobby_keywords):
+            repair_tools.append(f"навички: {hobby} ({name})")
+
+        # 2. Demographics & Sickness
+        age_at_exit = age + years
+        is_terminal = "смертельн" in health_lower
+        if is_terminal:
+            terminally_ill_players.append(name)
+        elif any(
+            h in health_lower
+            for h in [
+                "хвороба",
+                "чума",
+                "діабет",
+                "астма",
+                "інфекц",
+                "туберкульоз",
+                "інфаркт",
+                "гайморит",
+            ]
+        ):
+            treatable_sick_players.append(name)
+
+        is_fertile = (
+            "безплід" not in health_lower
+            and "безплід" not in fact_lower
+            and not is_terminal
+        )
+        if is_fertile:
+            max_age = 60 if gender == "Чоловік" else 50
+            match gender:
+                case "Чоловік" if 16 <= age_at_exit and age <= max_age:
+                    adult_males.append(f"{name} (зараз {age}, досяг {age_at_exit} р.)")
+                case "Жінка" if 16 <= age_at_exit and age <= max_age:
+                    adult_females.append(
+                        f"{name} (зараз {age}, досягла {age_at_exit} р.)"
+                    )
+
+        # 3. Key Apocalypse Specialists
+        if any(req in prof_lower or req in hobby_lower for req in key_profs_lower):
+            key_specialists.append(f"<b>{name}</b> ({prof})")
+
+        # 4. Medical Treatment
+        if any(kw in prof_lower for kw in med_keywords):
+            med_staff.append(f"<b>{name}</b> ({prof})")
+        if any(kw in bag_lower for kw in med_supplies):
+            med_items.append(f"{bag} ({name})")
+        elif any(kw in hobby_lower for kw in med_hobbies):
+            med_items.append(f"знання: {hobby} ({name})")
+
+        # 5. Food & Resources
+        if any(kw in prof_lower for kw in food_professions):
+            food_providers.append(f"<b>{name}</b> ({prof})")
+        if any(kw in bag_lower for kw in food_baggage):
+            food_items.append(f"{bag} ({name})")
+        elif any(kw in hobby_lower for kw in food_hobbies):
+            food_items.append(f"навички: {hobby} ({name})")
+
+        # 6. Energy & Morale
+        if any(kw in bag_lower for kw in energy_baggage) or any(
+            kw in prof_lower for kw in energy_profs
+        ):
+            energy_tech.append(name)
+        if (
+            any(kw in bag_lower for kw in morale_items)
+            or any(kw in hobby_lower for kw in morale_items)
+            or any(kw in prof_lower for kw in morale_items)
+            or any(kw in trait_lower for kw in morale_items)
+        ):
+            morale_boosters.append(name)
+
+    # 1. Evaluate Durability & Condition
+    repair_bonus = 0
+    if repair_specialists or repair_tools:
+        repair_bonus = min(35, len(repair_specialists) * 12 + len(repair_tools) * 8)
+        score += 15
+        spec_text = ", ".join(repair_specialists) if repair_specialists else "вижилі"
+        tool_text = ", ".join(repair_tools) if repair_tools else "підручні засоби"
+        details.append(
+            f"🛠️ <b>Ремонт та укріплення бункера:</b> Фахівці ({spec_text}) "
+            f"завдяки майстерності та спорядженню ({tool_text}) "
+            f"укріпили конструкцію (+{repair_bonus}% до міцності бункера)."
+        )
+
+    effective_durability = min(100, durability + repair_bonus)
+    final_condition = condition
+    if repair_bonus > 0 and (
+        "аварійний" in condition.lower() or "занедбаний" in condition.lower()
+    ):
+        final_condition = "Відновлений та стабілізований стан"
+
+    if effective_durability >= min_dur:
         score += 25
         details.append(
-            f"✅ Бункер (міцність {durability}%) витримав основні руйнівні чинники апокаліпсису ({apocalypse_name})."
+            f"✅ Бункер (міцність {effective_durability}%) витримав основні руйнівні чинники апокаліпсису ({apocalypse_name})."
         )
     else:
         score -= 20
         details.append(
-            f"⚠️ Бункер виявився занадто слабким (міцність {durability}% при необхідних {min_dur}%). Його частково зруйновано."
+            f"⚠️ Бункер виявився занадто слабким (міцність {effective_durability}% при необхідних {min_dur}%). Його частково зруйновано."
         )
 
-    adult_males = []
-    adult_females = []
-    sick_players = []
-
-    for p in alive_players:
-        name = html.escape(p.get("name", "Невідомий"))
-        char = p["character"]
-        age_at_exit = char["age"] + years
-        gender = char["gender"]
-        health = str(char["health"]).lower()
-        fact = str(char["fact"]).lower()
-
-        is_fertile = "безплід" not in health and "безплід" not in fact
-        if is_fertile:
-            max_age = 60 if gender == "Чоловік" else 50
-            match gender:
-                case "Чоловік" if 16 <= age_at_exit and char["age"] <= max_age:
-                    adult_males.append(
-                        f"{name} (зараз {char['age']}, досяг {age_at_exit} р.)"
-                    )
-                case "Жінка" if 16 <= age_at_exit and char["age"] <= max_age:
-                    adult_females.append(
-                        f"{name} (зараз {char['age']}, досягла {age_at_exit} р.)"
-                    )
-
-        if any(h in health for h in ["хвороба", "чума", "діабет", "астма"]):
-            sick_players.append(name)
-
+    # 2. Evaluate Demographics
     if adult_males and adult_females:
         score += 35
         males_str = ", ".join(adult_males)
@@ -1150,16 +1346,7 @@ def evaluate_survival(
             f"не сформувалося зрілої репродуктивної пари (Чоловіків 16+: {len(adult_males)}, Жінок 16+: {len(adult_females)})."
         )
 
-    key_specialists = []
-    for p in alive_players:
-        name = html.escape(p.get("name", "Невідомий"))
-        prof = p["character"]["profession"]
-        prof_lower = prof.lower()
-
-        # Перевірка: чи міститься будь-яка з вимог апокаліпсису в назві професії гравця
-        if any(req.lower() in prof_lower for req in key_profs):
-            key_specialists.append(f"<b>{name}</b> ({prof})")
-
+    # 3. Evaluate Key Apocalypse Specialists
     if key_specialists:
         score += 25
         specs_str = ", ".join(key_specialists)
@@ -1170,14 +1357,65 @@ def evaluate_survival(
             f"⚠️ Відсутні критично важливі професії ({', '.join(key_profs)}) для подолання катастрофи."
         )
 
-    if not sick_players:
+    # 4. Evaluate Medical & Health
+    if terminally_ill_players:
+        score -= 20
+        term_str = ", ".join(terminally_ill_players)
+        details.append(
+            f"💀 <b>Невиліковні випадки:</b> Смертельна хвороба забрала життя: <b>{term_str}</b>. "
+            f"Навіть найкраща медицина та лікарі виявилися безсилими."
+        )
+
+    if treatable_sick_players:
+        if med_staff or med_items:
+            score += 15
+            med_str = ", ".join(med_staff) if med_staff else "медикаменти"
+            items_str = ", ".join(med_items) if med_items else "базові засоби"
+            sick_str = ", ".join(treatable_sick_players)
+            details.append(
+                f"💉 <b>Медичне забезпечення:</b> Медичний персонал ({med_str}) та спорядження ({items_str}) "
+                f"успішно стабілізували стан хворих: <b>{sick_str}</b>!"
+            )
+        else:
+            score -= 10
+            sick_str = ", ".join(treatable_sick_players)
+            details.append(
+                f"☣️ Проблеми зі здоров'ям мають: <b>{sick_str}</b>, що ускладнює виживання."
+            )
+    elif not terminally_ill_players:
         score += 15
         details.append("💊 Усі вижилі абсолютно здорові.")
-    else:
-        score -= 10
-        sick_str = ", ".join(sick_players)
+
+    # 5. Evaluate Food & Resources
+    final_resources = resources
+    res_lower = resources.lower()
+    if food_providers or food_items:
+        score += 15
+        prov_text = ", ".join(food_providers) if food_providers else "запаси провізії"
+        item_text = ", ".join(food_items) if food_items else "харчові навички"
         details.append(
-            f"☣️ Проблеми зі здоров'ям мають: <b>{sick_str}</b>, що ускладнює виживання."
+            f"🍞 <b>Продовольча безпека та ресурси:</b> Завдяки запасам ({item_text}) та фахівцям ({prov_text}) "
+            f"бункер забезпечений стабільним харчуванням та водою на весь термін."
+        )
+        if "критичн" in res_lower or "обмежен" in res_lower:
+            final_resources = "Стабілізовані завдяки агрономії та запасам"
+    elif ("критичн" in res_lower or "обмежен" in res_lower) and years >= 3:
+        score -= 15
+        details.append(
+            f"🥫 <b>Криза ресурсів:</b> У бункері дефіцит провізії ({resources}), і ніхто не має запасів їжі чи аграрних навичок для їх поповнення."
+        )
+
+    # 6. Evaluate Energy & Morale
+    if energy_tech:
+        score += 5
+        details.append(
+            f"⚡ <b>Енергонезалежність та зв'язок:</b> Наявність енергообладнання та фахівців ({', '.join(set(energy_tech))}) дозволила зберегти живлення та зв'язок."
+        )
+
+    if morale_boosters:
+        score += 5
+        details.append(
+            f"🎸 <b>Моральний дух та згуртованість:</b> Завдяки підтримці та дозвіллю ({', '.join(set(morale_boosters))}) у бункері збережено психологічний баланс."
         )
 
     is_success = score >= 50
@@ -1186,8 +1424,8 @@ def evaluate_survival(
     report = (
         f"🏆 <b>ПІДСУМОК ВИЖИВАННЯ: {status_str}</b>\n\n"
         f"⏳ Час ізоляції: <b>{years} років</b>\n"
-        f"🏚️ Стан бункера: <b>{bunker_info['condition']}</b> (Міцність: {durability}%)\n"
-        f"📦 Ресурси: <b>{bunker_info['resources']}</b>\n\n"
+        f"🏚️ Стан бункера: <b>{final_condition}</b> (Міцність: {effective_durability}%)\n"
+        f"📦 Ресурси: <b>{final_resources}</b>\n\n"
         f"<b>Детальний аналіз експертів:</b>\n\n" + "\n\n".join(details)
     )
 

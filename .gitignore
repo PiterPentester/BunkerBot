@@ -13,3 +13,5 @@ wheels/
 .env
 k8s/secrets.yaml
 .DS_Store
+
+bunker-bot-argocd.yaml
